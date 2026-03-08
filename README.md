@@ -5,12 +5,12 @@ Rami Art Studio API backend built with Spring Boot.
 ## Requirements
 
 - Java 21
-- Maven (or use `./mvnw`)
+- Gradle (or use `./gradlew`)
 
 ## Run
 
 ```bash
-./mvnw spring-boot:run
+./gradlew bootRun
 ```
 
 ## Endpoints
