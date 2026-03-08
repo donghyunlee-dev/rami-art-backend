@@ -9,4 +9,19 @@ spring:
     hibernate:
       ddl-auto: none
   flyway:
-    enabled: false
+    enabled: true
+    default-schema: rami_art_studio
+    schemas: rami_art_studio
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+
+app:
+  version: 0.0.1-SNAPSHOT
+  security:
+    jwt-secret: rami-art-studio-secret-key-change-this-in-production-2026
+    access-token-expiration-seconds: 3600
+    refresh-token-expiration-seconds: 1209600
+    bootstrap-admin-email: admin@ramiartstudio.com
+    bootstrap-admin-name: 원장
+    bootstrap-admin-password: ChangeMe123!

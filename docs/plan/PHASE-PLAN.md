@@ -10,6 +10,8 @@
 4. 아래 문서 2종 기록 후 다음 단계 승인 요청
    - `docs/test/*`: 테스트 케이스, 실행 명령, 실제 결과
    - `docs/result/*`: 작업 맥락, 변경 파일, 주요 결정 사항
+5. 웹 연동 문서 갱신
+   - `docs/guide/WEB-API-INTEGRATION.md`에 단계별 API 요청/응답 JSON, 인증 흐름, 호출 규칙 최신화
 
 ## Phase 1. API Foundation
 - 범위

@@ -7,8 +7,6 @@ spring:
   config:
     activate:
       on-profile: dev
-  jackson:
-    property-naming-strategy: SNAKE_CASE
   datasource:
     url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require&prepareThreshold=0&preferQueryMode=simple}
     username: ${DB_USERNAME:postgres.gipaatdvbnmahvpwphtk}
@@ -44,6 +42,18 @@ spring:
     default-schema: rami_art_studio
     schemas: rami_art_studio
     locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+
+app:
+  version: 0.0.1-SNAPSHOT
+  security:
+    jwt-secret: ${JWT_SECRET:rami-art-studio-secret-key-change-this-in-production-2026}
+    access-token-expiration-seconds: 3600
+    refresh-token-expiration-seconds: 1209600
+    bootstrap-admin-email: ${BOOTSTRAP_ADMIN_EMAIL:admin@ramiartstudio.com}
+    bootstrap-admin-name: ${BOOTSTRAP_ADMIN_NAME:원장}
+    bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:ChangeMe123!}
 
 logging:
   level:
