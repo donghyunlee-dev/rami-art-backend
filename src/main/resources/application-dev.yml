@@ -1,0 +1,58 @@
+server:
+  port: 9000
+
+spring:
+  application:
+    name: rami-art-studio-api
+  config:
+    activate:
+      on-profile: dev
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require&prepareThreshold=0&preferQueryMode=simple}
+    username: ${DB_USERNAME:postgres.gipaatdvbnmahvpwphtk}
+    password: ${DB_PASSWORD:!@!L1e2e34!!!}
+    driver-class-name: org.postgresql.Driver
+
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 3000
+      idle-timeout: 30000
+      max-lifetime: 240000
+      data-source-properties:
+        cachePrepStmts: false
+        prepStmtCacheSize: 0
+        prepStmtCacheSqlLimit: 0
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: rami_art_studio
+        type:
+          bind: true
+        #format_sql: true
+        #use_sql_comments: false
+        #show_sql: true
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    default-schema: rami_art_studio
+    schemas: rami_art_studio
+    locations: classpath:db/migration
+
+logging:
+  level:
+    root: info
+    org:
+      springframework:
+        web: debug
+    com:
+      windsoft:
+        apartment_parking_manager: debug
+
+
