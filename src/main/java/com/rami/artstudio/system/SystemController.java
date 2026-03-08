@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.rami.artstudio.common.api.ApiResponse;
+
 @RestController
 @RequestMapping("/api/v1/system")
 public class SystemController {
@@ -24,17 +26,19 @@ public class SystemController {
     }
 
     @GetMapping("/health")
-    public ResponseEntity<Map<String, Object>> health() {
-        return ResponseEntity.ok(Map.of(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> health() {
+        Map<String, Object> data = Map.of(
                 "status", "UP",
                 "service", appName,
-                "timestamp", Instant.now().toString()));
+                "timestamp", Instant.now().toString());
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 
     @GetMapping("/version")
-    public ResponseEntity<Map<String, String>> version() {
-        return ResponseEntity.ok(Map.of(
+    public ResponseEntity<ApiResponse<Map<String, String>>> version() {
+        Map<String, String> data = Map.of(
                 "service", appName,
-                "version", appVersion));
+                "version", appVersion);
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 }

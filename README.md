@@ -24,9 +24,14 @@ Rami Art Studio API backend built with Spring Boot.
 
 ```json
 {
-  "status": "UP",
-  "service": "rami-art-backend",
-  "timestamp": "2026-03-08T13:00:00Z"
+  "success": true,
+  "data": {
+    "status": "UP",
+    "service": "rami-art-backend",
+    "timestamp": "2026-03-08T13:00:00Z"
+  },
+  "message": "처리 완료",
+  "error": null
 }
 ```
 
@@ -34,7 +39,12 @@ Rami Art Studio API backend built with Spring Boot.
 
 ```json
 {
-  "service": "rami-art-backend",
-  "version": "0.0.1-SNAPSHOT"
+  "success": true,
+  "data": {
+    "service": "rami-art-backend",
+    "version": "0.0.1-SNAPSHOT"
+  },
+  "message": "처리 완료",
+  "error": null
 }
 ```
