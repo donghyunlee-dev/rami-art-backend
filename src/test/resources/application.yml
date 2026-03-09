@@ -1,4 +1,6 @@
 spring:
+  application:
+    name: rami-art-studio-api
   datasource:
     url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require&prepareThreshold=0&preferQueryMode=simple}
     username: ${DB_USERNAME:postgres.gipaatdvbnmahvpwphtk}

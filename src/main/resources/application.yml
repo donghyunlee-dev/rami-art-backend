@@ -1,0 +1,49 @@
+server:
+  port: ${PORT:9000}
+
+spring:
+  application:
+    name: rami-art-studio-api
+  profiles:
+    active: local
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: ${DATASOURCE_URL}
+    username: ${DATASOURCE_USERNAME}
+    password: ${DATASOURCE_PASSWORD}
+    driver-class-name: ${DATASOURCE_DRIVER_CLASS_NAME}
+
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 3000
+      idle-timeout: 30000
+      max-lifetime: 240000
+      data-source-properties:
+        cachePrepStmts: false
+        prepStmtCacheSize: 0
+        prepStmtCacheSqlLimit: 0
+
+  jpa:
+    properties:
+      hibernate:
+        type:
+          bind: true
+        format_sql: true
+        #use_sql_comments: false
+        # show_sql: 'true'
+    open-in-view: false
+
+logging:
+  level:
+    root: info
+    org:
+      springframework:
+        web: debug
+    com:
+      rami:
+        artstudio: debug
+
+app:
+  version: 0.0.1-SNAPSHOT
