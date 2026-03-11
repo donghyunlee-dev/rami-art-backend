@@ -8,8 +8,8 @@
 
 | 항목 | 내용 |
 |------|------|
-| Base URL (Local) | `http://localhost:8080/api` |
-| Base URL (Production) | `https://api.ramiartstudio.com/api` |
+| Base URL (Local) | `http://localhost:9000/api` |
+| Base URL (Production) | `https://rami-art-backend.onrender.com/api` |
 | 프로토콜 | HTTPS 강제 (HTTP → HTTPS 리다이렉트) |
 | Content-Type | `application/json` (파일 업로드: `multipart/form-data`) |
 | 인증 방식 | Bearer Token (JWT) — `Authorization: Bearer {token}` |
@@ -174,6 +174,44 @@
 
 ---
 
+### GET `/api/v1/classes`
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "ageGroup": "kindergarten",
+      "ageRange": "5-7세",
+      "title": "유치부 미술 수업",
+      "description": "수업 설명...",
+      "curriculum": "커리큘럼 상세...",
+      "thumbnailUrl": "/images/design-mode/Gallery_08.png",
+      "sortOrder": 1,
+      "isActive": true,
+      "tags": ["기초 드로잉 표현", "선·형태·비율 연습"],
+      "createdAt": "2026-03-11T00:00:00Z",
+      "updatedAt": "2026-03-11T00:00:00Z"
+    }
+  ]
+}
+```
+
+### GET `/api/v1/classes/{id}`
+
+**Response 200**
+
+- `GET /api/v1/classes`의 단건 구조와 동일
+
+### GET `/api/v1/admin/classes`
+
+**Response 200**
+
+- `GET /api/v1/classes`와 동일한 배열 구조, 단 비활성 수업 포함
+
 ### POST `/api/v1/admin/classes`
 
 **Request Body**
@@ -182,13 +220,13 @@
 {
   "ageGroup": "kindergarten",
   "ageRange": "5-7세",
-  "title": "유치부",
+  "title": "유치부 미술 수업",
   "description": "수업 설명...",
   "curriculum": "커리큘럼 상세...",
   "thumbnailUrl": "https://...",
   "sortOrder": 1,
   "isActive": true,
-  "tags": ["감각 발달 활동", "상상력 키우기", "소근육 발달"]
+  "tags": ["기초 드로잉 표현", "선·형태·비율 연습"]
 }
 ```
 
@@ -203,10 +241,44 @@
     "id": "uuid",
     "ageGroup": "kindergarten",
     "ageRange": "5-7세",
-    "title": "유치부",
-    "tags": ["감각 발달 활동", "상상력 키우기", "소근육 발달"],
-    "createdAt": "2026-03-08T14:00:00Z"
+    "title": "유치부 미술 수업",
+    "description": "수업 설명...",
+    "curriculum": "커리큘럼 상세...",
+    "thumbnailUrl": "https://...",
+    "sortOrder": 1,
+    "isActive": true,
+    "tags": ["기초 드로잉 표현", "선·형태·비율 연습"],
+    "createdAt": "2026-03-11T00:00:00Z",
+    "updatedAt": "2026-03-11T00:00:00Z"
   }
+}
+```
+
+### PUT `/api/v1/admin/classes/{id}`
+
+**Request Body**
+
+- `POST /api/v1/admin/classes`와 동일
+
+### PATCH `/api/v1/admin/classes/{id}/sort`
+
+**Request Body**
+
+```json
+{
+  "sortOrder": 10
+}
+```
+
+### DELETE `/api/v1/admin/classes/{id}`
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": null,
+  "message": "수업이 삭제되었습니다."
 }
 ```
 
