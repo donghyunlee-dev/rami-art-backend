@@ -204,7 +204,7 @@ public class GalleryServiceImpl implements GalleryService {
         }
         work.setAgeGroup(request.ageGroup());
         work.setArtistName(request.artistName());
-        work.setCreatedYear(request.createdYear());
+        work.setCreatedYear(request.createdYear() == null ? null : request.createdYear().shortValue());
         work.setSortOrder(request.sortOrder());
         work.setIsFeatured(request.isFeatured());
         work.setIsActive(request.isActive());
@@ -315,7 +315,7 @@ public class GalleryServiceImpl implements GalleryService {
                 work.getImagePath(),
                 work.getAgeGroup(),
                 work.getArtistName(),
-                work.getCreatedYear(),
+                work.getCreatedYear() == null ? null : Integer.valueOf(work.getCreatedYear()),
                 work.getSortOrder(),
                 work.getIsFeatured(),
                 work.getIsActive(),

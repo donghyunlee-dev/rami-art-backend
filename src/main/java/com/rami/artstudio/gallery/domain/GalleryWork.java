@@ -37,7 +37,7 @@ public class GalleryWork {
     private String artistName;
 
     @Column(name = "created_year")
-    private Integer createdYear;
+    private Short createdYear;
 
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder;
@@ -121,11 +121,11 @@ public class GalleryWork {
         this.artistName = artistName;
     }
 
-    public Integer getCreatedYear() {
+    public Short getCreatedYear() {
         return createdYear;
     }
 
-    public void setCreatedYear(Integer createdYear) {
+    public void setCreatedYear(Short createdYear) {
         this.createdYear = createdYear;
     }
 
