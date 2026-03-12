@@ -20,6 +20,10 @@ spring:
 
 app:
   version: 0.0.1-SNAPSHOT
+  storage:
+    supabase-url: https://test-project.supabase.co
+    service-key: test-service-key
+    gallery-bucket: pub_rami_art_bucket
   security:
     jwt-secret: rami-art-studio-secret-key-change-this-in-production-2026
     access-token-expiration-seconds: 3600

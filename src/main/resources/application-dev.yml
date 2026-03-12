@@ -47,6 +47,10 @@ spring:
 
 app:
   version: 0.0.1-SNAPSHOT
+  storage:
+    supabase-url: ${SUPABASE_URL:}
+    service-key: ${SUPABASE_SERVICE_KEY:}
+    gallery-bucket: ${SUPABASE_GALLERY_BUCKET:pub_rami_art_bucket}
   security:
     jwt-secret: ${JWT_SECRET:rami-art-studio-secret-key-change-this-in-production-2026}
     access-token-expiration-seconds: 3600
@@ -65,5 +69,4 @@ logging:
     com:
       windsoft:
         apartment_parking_manager: debug
-
 

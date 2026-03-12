@@ -47,3 +47,7 @@ logging:
 
 app:
   version: 0.0.1-SNAPSHOT
+  storage:
+    supabase-url: ${SUPABASE_URL:}
+    service-key: ${SUPABASE_SERVICE_KEY:}
+    gallery-bucket: ${SUPABASE_GALLERY_BUCKET:pub_rami_art_bucket}
