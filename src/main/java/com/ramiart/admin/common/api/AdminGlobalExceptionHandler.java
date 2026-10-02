@@ -17,9 +17,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class AdminGlobalExceptionHandler {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(AdminGlobalExceptionHandler.class);
 
     @ExceptionHandler(AuthRateLimitException.class)
     ResponseEntity<ApiEnvelope<Void>> handleRateLimit(AuthRateLimitException exception, HttpServletRequest request) {
