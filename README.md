@@ -1,6 +1,7 @@
 # rami-art-backend
 
-Rami Art Studio API backend built with Spring Boot.
+Rami Art Studio API backend built with Spring Boot. The application now serves
+the existing public API and the administrator API from one Render service.
 
 ## Requirements
 
@@ -17,6 +18,23 @@ Rami Art Studio API backend built with Spring Boot.
 
 - `GET /api/v1/system/health`
 - `GET /api/v1/system/version`
+- `POST /api/admin/auth/sessions`
+- `GET /api/admin/students`
+- `GET /api/admin/courses`
+- `GET /api/admin/monthly-schedules/{yearMonth}`
+- `GET /api/admin/attendance-sessions`
+
+The legacy API remains under `/api/v1/**`; administrator workflows use
+`/api/admin/**`. They use separate security chains and database schemas.
+
+## Database migrations
+
+The existing Flyway migrations under `src/main/resources/db/migration` remain
+the source for the legacy `rami_art_studio` schema. Administrator schema,
+RLS, grants and seed files are versioned under `supabase/migrations` and must
+be applied through the Supabase CLI after a dry run. They are intentionally
+not auto-applied by the legacy Flyway runner to avoid changing an existing
+production database during application startup.
 
 ## Example Responses
 
