@@ -32,6 +32,9 @@ dependencies {
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 	runtimeOnly 'org.postgresql:postgresql'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation platform('io.zonky.test.postgres:embedded-postgres-binaries-bom:17.10.0')
+	testImplementation 'io.zonky.test:embedded-postgres:2.2.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
