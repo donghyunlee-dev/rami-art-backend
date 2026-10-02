@@ -20,6 +20,7 @@ spring:
       idle-timeout: 30000
       max-lifetime: 240000
       data-source-properties:
+        sslmode: require
         cachePrepStmts: false
         prepStmtCacheSize: 0
         prepStmtCacheSqlLimit: 0
