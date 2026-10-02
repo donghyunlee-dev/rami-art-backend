@@ -51,3 +51,13 @@ app:
     supabase-url: ${SUPABASE_URL:}
     service-key: ${SUPABASE_SERVICE_KEY:}
     gallery-bucket: ${SUPABASE_GALLERY_BUCKET:pub_rami_art_bucket}
+
+admin:
+  security:
+    allowed-origin: ${ADMIN_ALLOWED_ORIGIN:http://localhost:3000}
+    staff-phone-key: ${ADMIN_STAFF_PHONE_KEY:}
+    inquiry-data-key: ${ADMIN_INQUIRY_DATA_KEY:}
+    student-data-key: ${ADMIN_STUDENT_DATA_KEY:}
+  media:
+    storage-root: ${ADMIN_MEDIA_STORAGE_ROOT:build/media-storage}
+    public-base-url: ${ADMIN_MEDIA_PUBLIC_BASE_URL:https://rami-art-backend.onrender.com}
