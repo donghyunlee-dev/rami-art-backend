@@ -66,7 +66,7 @@ public final class AssignmentController {
         HttpStatus status = switch (exception.code()) {
             case "STUDENT_NOT_FOUND", "SCHEDULE_SLOT_NOT_FOUND", "ASSIGNMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "STUDENT_SCHEDULE_CONFLICT", "ASSIGNMENT_VERSION_CONFLICT", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_IN_PROGRESS" -> HttpStatus.CONFLICT;
-            case "ASSIGNMENT_HISTORY_EXISTS", "STUDENT_STATUS_NOT_ASSIGNABLE", "SCHEDULE_SLOT_RETIRED" -> HttpStatus.UNPROCESSABLE_CONTENT;
+            case "ASSIGNMENT_HISTORY_EXISTS", "STUDENT_STATUS_NOT_ASSIGNABLE", "SCHEDULE_SLOT_RETIRED" -> HttpStatus.UNPROCESSABLE_ENTITY;
             default -> HttpStatus.BAD_REQUEST;
         };
         Map<String, Object> error = new LinkedHashMap<>();

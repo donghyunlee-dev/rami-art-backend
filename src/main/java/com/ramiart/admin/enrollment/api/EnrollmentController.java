@@ -43,7 +43,7 @@ public final class EnrollmentController {
     ResponseEntity<?> error(EnrollmentException exception,HttpServletRequest request){HttpStatus status=switch(exception.code()){
         case "ENROLLMENT_NOT_FOUND","INQUIRY_NOT_FOUND","CLASS_GROUP_NOT_FOUND"->HttpStatus.NOT_FOUND;
         case "ENROLLMENT_CASE_EXISTS","ENROLLMENT_VERSION_CONFLICT","ENROLLMENT_CAPACITY_FULL","IDEMPOTENCY_KEY_REUSED","IDEMPOTENCY_IN_PROGRESS"->HttpStatus.CONFLICT;
-        case "ENROLLMENT_CONSENT_REQUIRED","ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED","ENROLLMENT_INVALID_TRANSITION","ENROLLMENT_PREVIEW_REQUIRED","ENROLLMENT_SLOT_INVALID"->HttpStatus.UNPROCESSABLE_CONTENT;
+        case "ENROLLMENT_CONSENT_REQUIRED","ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED","ENROLLMENT_INVALID_TRANSITION","ENROLLMENT_PREVIEW_REQUIRED","ENROLLMENT_SLOT_INVALID"->HttpStatus.UNPROCESSABLE_ENTITY;
         default->HttpStatus.BAD_REQUEST;};Map<String,Object> value=new LinkedHashMap<>();value.put("code",exception.code());value.put("message",message(exception.code()));if(!exception.details().isEmpty())value.put("details",exception.details());return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("success",false,"error",value,"requestId",RequestIdFilter.get(request)));}
 
     private static String message(String code){return switch(code){case "ENROLLMENT_CASE_EXISTS"->"이미 연결된 등록 상담이 있습니다.";case "ENROLLMENT_VERSION_CONFLICT"->"다른 관리자가 먼저 변경했습니다.";case "ENROLLMENT_CAPACITY_FULL"->"반 정원이 마감되었습니다.";case "ENROLLMENT_CONSENT_REQUIRED"->"필수 동의가 필요합니다.";case "ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED"->"중복 후보 확인이 필요합니다.";case "ENROLLMENT_INVALID_TRANSITION"->"현재 단계에서 허용되지 않는 변경입니다.";case "ENROLLMENT_PREVIEW_REQUIRED"->"등록 영향을 다시 확인해 주세요.";default->"입력값을 확인해 주세요.";};}

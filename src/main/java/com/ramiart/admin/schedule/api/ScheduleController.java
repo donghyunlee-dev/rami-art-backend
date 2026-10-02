@@ -59,7 +59,7 @@ public final class ScheduleController {
         HttpStatus status = switch (exception.code()) {
             case "MONTHLY_SCHEDULE_NOT_FOUND", "MONTHLY_SCHEDULE_DRAFT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "MONTHLY_SCHEDULE_DRAFT_EXISTS", "PUBLISHED_SCHEDULE_IMMUTABLE", "SCHEDULE_VERSION_CONFLICT", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_IN_PROGRESS" -> HttpStatus.CONFLICT;
-            case "SCHEDULE_CONFLICT", "SCHEDULE_NOT_PUBLISHABLE", "SCHEDULE_SLOT_CLASS_GROUP_MISMATCH", "SCHEDULE_ATTENDANCE_ALREADY_RECORDED" -> HttpStatus.UNPROCESSABLE_CONTENT;
+            case "SCHEDULE_CONFLICT", "SCHEDULE_NOT_PUBLISHABLE", "SCHEDULE_SLOT_CLASS_GROUP_MISMATCH", "SCHEDULE_ATTENDANCE_ALREADY_RECORDED" -> HttpStatus.UNPROCESSABLE_ENTITY;
             default -> HttpStatus.BAD_REQUEST;
         };
         Map<String, Object> error = new LinkedHashMap<>(); error.put("code", exception.code()); error.put("message", message(exception.code()));

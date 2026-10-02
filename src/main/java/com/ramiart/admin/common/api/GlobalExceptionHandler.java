@@ -65,7 +65,7 @@ public class GlobalExceptionHandler {
                 ? "SESSION_EXTENSION_INVALID"
                 : invalidNewPassword ? "PASSWORD_POLICY_VIOLATION" : "VALIDATION_ERROR";
         HttpStatus status = invalidExtension || invalidNewPassword
-                ? HttpStatus.UNPROCESSABLE_CONTENT
+                ? HttpStatus.UNPROCESSABLE_ENTITY
                 : HttpStatus.BAD_REQUEST;
         return ResponseEntity.status(status).body(ApiEnvelope.failure(
                 code, "입력값을 확인해 주세요.", fieldErrors, RequestIdFilter.get(request)));
@@ -175,15 +175,15 @@ public class GlobalExceptionHandler {
             case "SESSION_NOT_EXTENDABLE" -> new ErrorDefinition(
                     HttpStatus.CONFLICT, "현재 세션을 더 이상 연장할 수 없습니다.");
             case "SESSION_EXTENSION_INVALID" -> new ErrorDefinition(
-                    HttpStatus.UNPROCESSABLE_CONTENT, "세션 연장 요청을 확인해 주세요.");
+                    HttpStatus.UNPROCESSABLE_ENTITY, "세션 연장 요청을 확인해 주세요.");
             case "CURRENT_PASSWORD_INVALID" -> new ErrorDefinition(
                     HttpStatus.UNAUTHORIZED, "현재 비밀번호가 올바르지 않습니다.");
             case "PASSWORD_POLICY_VIOLATION" -> new ErrorDefinition(
-                    HttpStatus.UNPROCESSABLE_CONTENT, "새 비밀번호 정책을 확인해 주세요.");
+                    HttpStatus.UNPROCESSABLE_ENTITY, "새 비밀번호 정책을 확인해 주세요.");
             case "PASSWORD_COMPROMISED" -> new ErrorDefinition(
-                    HttpStatus.UNPROCESSABLE_CONTENT, "널리 알려진 유출 비밀번호는 사용할 수 없습니다.");
+                    HttpStatus.UNPROCESSABLE_ENTITY, "널리 알려진 유출 비밀번호는 사용할 수 없습니다.");
             case "PASSWORD_REUSED" -> new ErrorDefinition(
-                    HttpStatus.UNPROCESSABLE_CONTENT, "최근 사용한 비밀번호는 다시 사용할 수 없습니다.");
+                    HttpStatus.UNPROCESSABLE_ENTITY, "최근 사용한 비밀번호는 다시 사용할 수 없습니다.");
             case "ADMIN_USER_VERSION_CONFLICT" -> new ErrorDefinition(
                     HttpStatus.CONFLICT, "계정 정보가 변경되었습니다. 다시 시도해 주세요.");
             default -> new ErrorDefinition(
@@ -204,15 +204,15 @@ public class GlobalExceptionHandler {
                     "같은 요청 키가 다른 내용에 사용되었습니다.");
             case "IDEMPOTENCY_IN_PROGRESS" -> new ErrorDefinition(HttpStatus.CONFLICT,
                     "동일한 요청을 처리하고 있습니다. 잠시 후 다시 확인해 주세요.");
-            case "COURSE_HAS_ACTIVE_GROUPS" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "COURSE_HAS_ACTIVE_GROUPS" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "운영 중인 반이 있어 과정을 비활성화할 수 없습니다.");
-            case "CLASS_CAPACITY_BELOW_OCCUPANCY" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "CLASS_CAPACITY_BELOW_OCCUPANCY" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "현재 또는 예정된 등록·보강 인원보다 정원을 줄일 수 없습니다.");
-            case "CLASS_GROUP_NOT_DRAFT" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "CLASS_GROUP_NOT_DRAFT" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "준비 상태의 반만 삭제할 수 있습니다.");
-            case "CLASS_GROUP_REFERENCED" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "CLASS_GROUP_REFERENCED" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "시간표, 배정 또는 운영 기록에서 참조 중인 반은 삭제할 수 없습니다.");
-            case "COURSE_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "COURSE_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "비활성 과정에는 반을 만들 수 없습니다.");
             case "COURSE_QUERY_INVALID", "COURSE_VALIDATION_ERROR" -> new ErrorDefinition(
                     HttpStatus.BAD_REQUEST, "과정 또는 반 입력값을 확인해 주세요.");
@@ -237,17 +237,17 @@ public class GlobalExceptionHandler {
                     "같은 요청 키가 다른 내용에 사용되었습니다.");
             case "IDEMPOTENCY_IN_PROGRESS" -> new ErrorDefinition(HttpStatus.CONFLICT,
                     "동일한 요청을 처리하고 있습니다. 잠시 후 다시 확인해 주세요.");
-            case "STAFF_PERIOD_OUTSIDE_EMPLOYMENT" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_PERIOD_OUTSIDE_EMPLOYMENT" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "담당 기간은 직원 근무 기간과 반 운영 기간 안이어야 합니다.");
-            case "STAFF_FUTURE_ASSIGNMENT_EXISTS" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_FUTURE_ASSIGNMENT_EXISTS" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "종료되지 않은 담당 반이 있습니다. 퇴사일에 맞춰 함께 종료해 주세요.");
-            case "STAFF_ASSIGNMENT_HISTORY_IMMUTABLE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_ASSIGNMENT_HISTORY_IMMUTABLE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "종료된 담당 이력은 삭제할 수 없습니다.");
-            case "STAFF_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "퇴사한 직원에게 담당 반을 지정할 수 없습니다.");
-            case "STAFF_CODE_IMMUTABLE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_CODE_IMMUTABLE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "발급된 직원 코드는 변경할 수 없습니다.");
-            case "STAFF_ADMIN_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_CONTENT,
+            case "STAFF_ADMIN_INACTIVE" -> new ErrorDefinition(HttpStatus.UNPROCESSABLE_ENTITY,
                     "활성 관리자 계정만 연결할 수 있습니다.");
             case "STAFF_QUERY_INVALID", "STAFF_VALIDATION_ERROR" -> new ErrorDefinition(
                     HttpStatus.BAD_REQUEST, "직원 또는 담당 입력값을 확인해 주세요.");

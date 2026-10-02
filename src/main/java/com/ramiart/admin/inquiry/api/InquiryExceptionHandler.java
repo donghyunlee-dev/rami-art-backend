@@ -30,10 +30,10 @@ public final class InquiryExceptionHandler {
     }
     private static Definition definition(String code){return switch(code){
         case "INQUIRY_INVALID","INQUIRY_QUERY_INVALID"->new Definition(HttpStatus.BAD_REQUEST,"문의 입력값을 확인해 주세요.");
-        case "PRIVACY_CONSENT_REQUIRED"->new Definition(HttpStatus.UNPROCESSABLE_CONTENT,"개인정보 수집 동의가 필요합니다.");
-        case "CONSENT_POLICY_VERSION_INVALID"->new Definition(HttpStatus.UNPROCESSABLE_CONTENT,"최신 개인정보 동의문을 확인해 주세요.");
-        case "INQUIRY_NOTE_REQUIRED"->new Definition(HttpStatus.UNPROCESSABLE_CONTENT,"처리 메모는 5자 이상 1000자 이하로 입력해 주세요.");
-        case "INQUIRY_TRANSITION_DENIED"->new Definition(HttpStatus.UNPROCESSABLE_CONTENT,"허용되지 않은 문의 상태 변경입니다.");
+        case "PRIVACY_CONSENT_REQUIRED"->new Definition(HttpStatus.UNPROCESSABLE_ENTITY,"개인정보 수집 동의가 필요합니다.");
+        case "CONSENT_POLICY_VERSION_INVALID"->new Definition(HttpStatus.UNPROCESSABLE_ENTITY,"최신 개인정보 동의문을 확인해 주세요.");
+        case "INQUIRY_NOTE_REQUIRED"->new Definition(HttpStatus.UNPROCESSABLE_ENTITY,"처리 메모는 5자 이상 1000자 이하로 입력해 주세요.");
+        case "INQUIRY_TRANSITION_DENIED"->new Definition(HttpStatus.UNPROCESSABLE_ENTITY,"허용되지 않은 문의 상태 변경입니다.");
         case "INQUIRY_NOT_FOUND"->new Definition(HttpStatus.NOT_FOUND,"문의를 찾을 수 없습니다.");
         case "INQUIRY_VERSION_CONFLICT","IDEMPOTENCY_KEY_REUSED","IDEMPOTENCY_IN_PROGRESS"->new Definition(HttpStatus.CONFLICT,"문의가 변경되었습니다. 최신 내용을 다시 확인해 주세요.");
         case "INQUIRY_RATE_LIMITED"->new Definition(HttpStatus.TOO_MANY_REQUESTS,"요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");

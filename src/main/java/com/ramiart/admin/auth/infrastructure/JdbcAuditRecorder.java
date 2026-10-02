@@ -3,8 +3,8 @@ package com.ramiart.admin.auth.infrastructure;
 import com.ramiart.admin.auth.application.AuditRecorder;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JacksonException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Repository
 public class JdbcAuditRecorder implements AuditRecorder {
