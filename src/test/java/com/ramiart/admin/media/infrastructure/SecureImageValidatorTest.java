@@ -47,4 +47,3 @@ class SecureImageValidatorTest {
         assertThatThrownBy(callable).isInstanceOf(MediaException.class).extracting("code").isEqualTo(code);
     }
 }
-
