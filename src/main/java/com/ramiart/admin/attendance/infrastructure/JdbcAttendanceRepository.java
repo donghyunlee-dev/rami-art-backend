@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class JdbcAttendanceRepository implements AttendanceRepository {
+public class JdbcAttendanceRepository implements AttendanceRepository {
     private final JdbcClient jdbc;
     public JdbcAttendanceRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
     @Override public List<StudentRow> findByDate(LocalDate date) {
