@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: rami-admin-backend
+  datasource:
+    url: ${ADMIN_DATABASE_URL:jdbc:postgresql://127.0.0.1:54322/postgres}
+    username: ${ADMIN_DATABASE_USERNAME:postgres}
+    password: ${ADMIN_DATABASE_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: ${ADMIN_DATABASE_POOL_SIZE:10}
+      connection-timeout: 3000
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: true
+
+server:
+  # Render injects PORT. Keep ADMIN_BACKEND_PORT as a local override, but use
+  # the Render-compatible 9000 default for the production backend service.
+  port: ${PORT:${ADMIN_BACKEND_PORT:9000}}
+  shutdown: graceful
+  forward-headers-strategy: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+admin:
+  security:
+    allowed-origin: ${ADMIN_ALLOWED_ORIGIN:http://localhost:3000}
+    # Local-only fallback. Deployments must provide an independently generated 32-byte Base64 key.
+    staff-phone-key: ${ADMIN_STAFF_PHONE_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    inquiry-data-key: ${ADMIN_INQUIRY_DATA_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    student-data-key: ${ADMIN_STUDENT_DATA_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+  media:
+    storage-root: ${ADMIN_MEDIA_STORAGE_ROOT:build/media-storage}
+    public-base-url: ${ADMIN_MEDIA_PUBLIC_BASE_URL:http://localhost:8080}
