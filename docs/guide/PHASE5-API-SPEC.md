@@ -120,7 +120,12 @@ Phase 5는 기존 시스템을 바꾸지 않고 관리자 전용 경계를 사�
 - 기준 테이블은 `public.blog_post`이며 복수형 `blog_posts` 테이블은 사용하지 않는다.
 - 한 `post_id`에 DRAFT는 최대 1개, PUBLISHED는 최대 1개다. PUBLISHED·ARCHIVED는 immutable이다.
 - 현재 migration의 `public.blog_post`에는 `title`, `summary`, `category`, `media_asset_id`, `alt_text`만 있고 본문 컬럼이 없다.
-- WYSIWYG 본문을 계약에 포함하므로 구현 전에 `content text not null`(DRAFT는 null 허용 여부를 별도 결정)와 길이·HTML sanitization 정책을 추가 migration으로 확정한다. 구현자는 임의로 `summary`에 본문을 저장하지 않는다.
+- WYSIWYG 본문을 계약에 포함하므로 구현 전에 `content text null` 컬럼과 길이·HTML sanitization 정책을 추가 migration으로 확정한다. 구현자는 임의로 `summary`에 본문을 저장하지 않는다.
+- DRAFT는 `content=null` 또는 빈 문자열을 허용하지만 PUBLISHED는 정제 후 비어 있지 않은 본문을 요구한다.
+- 저장 허용 HTML 요소는 `p`, `br`, `strong`, `em`, `u`, `s`, `ul`, `ol`, `li`, `blockquote`, `h2`, `h3`, `a`, `img`다. 허용 속성은 `a[href]`, `a[target]`, `a[rel]`, `img[src]`, `img[alt]`, `img[width]`, `img[height]`뿐이다.
+- `href`와 `src`는 `https://` 또는 내부 `/media/` 경로만 허용한다. `javascript:`, `data:`, `vbscript:`, inline event 속성, style 속성, iframe·script·form은 제거한다. 외부 이미지 `src`는 `https://`만 허용한다.
+- 정제 후 본문은 최대 100,000 Unicode 문자이며, 초과하면 `BLOG_CONTENT_TOO_LARGE(422)`다. 허용되지 않은 HTML이나 URL은 자동 제거하지 않고 `BLOG_CONTENT_INVALID(422)`로 거부한다.
+- 저장 시 서버에서 HTML을 canonical sanitize하고, 공개 응답 시에도 동일 sanitizer를 한 번 더 적용한다. 미리보기는 저장될 canonical 결과를 사용한다.
 
 ### 관리자 목록
 
@@ -192,6 +197,71 @@ Query: `keyword`(2~50자), `categories[]`(`CLASS_STORY|STUDIO_NEWS|ARTWORK_STORY
 - `GET /api/admin/inquiries?keyword&courseIds&statuses&from&to&readState&page&size`: `INQUIRY_READ`, `200`; item은 `inquiryId`, `name`, `maskedPhone`, `interestedCourse`, `status`, `read`, `receivedAt`, `lastActivityAt`, `stale`이며 원문·ciphertext·hash를 포함하지 않는다.
 - `GET /api/admin/inquiries/{inquiryId}`: `INQUIRY_READ`, `200`; 권한 있는 관리자에게만 원문 전화번호·동의·알림·allowedTransitions·activities를 반환한다. 없거나 파기된 경우 `404 INQUIRY_NOT_FOUND`다.
 
+관리자 목록 응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "page": 0,
+    "size": 20,
+    "totalElements": 12,
+    "totalPages": 1,
+    "summary": {"unreadCount": 3, "staleCount": 2},
+    "items": [{
+      "inquiryId": "uuid",
+      "name": "홍길동",
+      "maskedPhone": "***-****-5678",
+      "interestedCourse": {"courseId":"uuid","name":"초등 창작"},
+      "status": "RECEIVED",
+      "read": false,
+      "receivedAt": "2026-10-03T10:00:00Z",
+      "lastActivityAt": "2026-10-03T10:00:00Z",
+      "stale": false
+    }]
+  },
+  "error": null,
+  "requestId": "req_uuid"
+}
+```
+
+`stale=true`는 `status`가 `COMPLETED`·`UNREACHABLE`이 아니고 `receivedAt`이 현재 UTC 시각보다 72시간 이상 지난 경우다. `lastActivityAt`은 가장 최근 activity의 `createdAt`, activity가 없으면 `receivedAt`이다. `summary`와 `items`는 동일한 DB snapshot에서 계산한다.
+
+관리자 상세 응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "inquiryId": "uuid",
+    "version": 1,
+    "name": "홍길동",
+    "phone": "+821012345678",
+    "displayPhone": "010-1234-5678",
+    "interestedCourse": {"courseId":"uuid","name":"초등 창작","active":true},
+    "message": "초등부 수업 가능 시간을 문의합니다.",
+    "status": "CONTACTING",
+    "read": true,
+    "readAt": "2026-10-03T10:10:00Z",
+    "readBy": {"adminUserId":"uuid","displayName":"원장"},
+    "consent": {"policyVersion":"2026-10","consentedAt":"2026-10-03T10:00:00Z"},
+    "notification": {"status":"SENT","attemptedAt":"2026-10-03T10:00:05Z"},
+    "allowedTransitions": ["COMPLETED","UNREACHABLE"],
+    "activities": [{
+      "activityId":"uuid",
+      "fromStatus":"RECEIVED",
+      "toStatus":"CONTACTING",
+      "note":"전화 연결을 시도함",
+      "createdBy":{"adminUserId":"uuid","displayName":"원장"},
+      "createdAt":"2026-10-03T10:10:00Z",
+      "inquiryVersion":1
+    }]
+  },
+  "error": null,
+  "requestId": "req_uuid"
+}
+```
+
 ### 읽음·상태 처리
 
 - `POST /api/admin/inquiries/{inquiryId}/read-receipts`: `INQUIRY_READ`, `Idempotency-Key`, body `{ "inquiryVersion": 0 }`; 최초 읽음만 저장하고 version 불일치는 `409 INQUIRY_VERSION_CONFLICT`다.
@@ -230,12 +300,101 @@ DB trigger가 logo·favicon·share asset의 READY 상태를 확인하고 favicon
 - `POST /api/admin/site-brand/preview`: `SITE_BRAND_READ`; body는 저장 DTO와 동일하고 `version`은 선택; 응답은 `renderModel`, `contrastChecks[]`, `warnings[]`, `publishable`이다. 비영속이다.
 - `POST /api/admin/site-brand/draft/{draftId}/publish`: `SITE_BRAND_PUBLISH`, `Idempotency-Key`; body `{ "version": 3 }`; revision·media reference·audit를 원자 처리한다.
 
+관리자 조회 응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "editable": true,
+    "draftId": "uuid",
+    "sourceStatus": "DRAFT",
+    "published": {
+      "id":"uuid","revision":2,"status":"PUBLISHED","version":4,
+      "brandName":"라미아트 미술교습소","shortName":"라미아트",
+      "logoAssetId":"uuid","logoAltText":"라미아트 로고","faviconAssetId":"uuid","shareAssetId":"uuid",
+      "primaryColor":"#1F2937","accentColor":"#F59E0B","fontPreset":"SYSTEM_SANS",
+      "canonicalHost":"https://ramiartstudio.com","defaultTitle":"라미아트 미술교습소",
+      "defaultDescription":"아이들의 창작을 돕는 미술교습소입니다.","instagramUrl":null,"blogUrl":null,
+      "media":{"logoUrl":"/media/logo.webp","faviconUrl":"/media/favicon.webp","shareUrl":"/media/share.webp"},
+      "updatedAt":"2026-10-03T10:00:00Z","publishedAt":"2026-10-03T10:00:00Z"
+    },
+    "draft": null
+  },
+  "error": null,
+  "requestId": "req_uuid"
+}
+```
+
+미리보기 요청과 응답 예시:
+
+```json
+POST /api/admin/site-brand/preview
+{
+  "version": 4,
+  "brandName":"라미아트 미술교습소","shortName":"라미아트",
+  "logoAssetId":"uuid","logoAltText":"라미아트 로고","faviconAssetId":"uuid","shareAssetId":"uuid",
+  "primaryColor":"#1F2937","accentColor":"#F59E0B","fontPreset":"SYSTEM_SANS",
+  "canonicalHost":"https://ramiartstudio.com","defaultTitle":"라미아트 미술교습소",
+  "defaultDescription":"아이들의 창작을 돕는 미술교습소입니다.","instagramUrl":null,"blogUrl":null
+}
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "renderModel": {
+      "brandName":"라미아트 미술교습소","shortName":"라미아트",
+      "logoUrl":"/media/logo.webp","faviconUrl":"/media/favicon.webp","shareUrl":"/media/share.webp",
+      "primaryColor":"#1F2937","accentColor":"#F59E0B","fontPreset":"SYSTEM_SANS",
+      "defaultTitle":"라미아트 미술교습소","defaultDescription":"아이들의 창작을 돕는 미술교습소입니다.",
+      "canonicalHost":"https://ramiartstudio.com"
+    },
+    "contrastChecks":[{"pair":"primary-on-background","ratio":12.4,"passed":true}],
+    "warnings":[],
+    "publishable":true
+  },
+  "error": null,
+  "requestId": "req_uuid"
+}
+```
+
+### 공개 브랜드 조회
+
+`GET /api/public/site-brand`
+
+공개 웹사이트가 동적으로 브랜드 설정을 읽을 수 있도록 제공한다. 인증과 Origin 검증은 없고, `status=PUBLISHED`인 최신 revision만 반환한다. 이 endpoint를 활성화할 때 `SecurityConfiguration`의 GET allowlist와 CORS 정책을 함께 추가한다.
+
+공개 응답은 내부 ID·version·작성자·초안을 제외한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "revision": 2,
+    "brandName":"라미아트 미술교습소","shortName":"라미아트",
+    "logoUrl":"/media/logo.webp","logoAltText":"라미아트 로고",
+    "faviconUrl":"/media/favicon.webp","shareImageUrl":"/media/share.webp",
+    "primaryColor":"#1F2937","accentColor":"#F59E0B","fontPreset":"SYSTEM_SANS",
+    "canonicalHost":"https://ramiartstudio.com","defaultTitle":"라미아트 미술교습소",
+    "defaultDescription":"아이들의 창작을 돕는 미술교습소입니다.","instagramUrl":null,"blogUrl":null,
+    "publishedAt":"2026-10-03T10:00:00Z"
+  },
+  "error": null,
+  "requestId": "req_uuid"
+}
+```
+
+공개 설정이 없으면 `404 SITE_BRAND_NOT_FOUND`이며 응답은 `ETag`와 `Cache-Control: public, max-age=60, stale-while-revalidate=300`을 사용할 수 있다. 비공개·DRAFT 값은 공개하지 않는다.
+
 오류 코드는 `SITE_BRAND_VALIDATION_FAILED(400)`, `SITE_BRAND_ACCESS_DENIED(403)`, `SITE_BRAND_NOT_FOUND(404)`, `SITE_BRAND_VERSION_CONFLICT(409)`, `SITE_BRAND_DRAFT_EXISTS(409)`, `SITE_BRAND_CONTRAST_FAILED(422)`, `SITE_BRAND_MEDIA_NOT_READY(422)`, `SITE_BRAND_PERSISTENCE_FAILED(500)`다.
 
 ## 구현 전 migration 기준
 
 - `public.inquiry`, `public.inquiry_activity`, `public.site_brand_config`, `public.blog_post`를 기준으로 하며 `contacts`, `blog_posts`, `site_settings`는 생성하지 않는다.
 - `public.blog_post`에 본문을 저장하려면 별도 Flyway/Supabase migration으로 `content` 컬럼·길이 제한·sanitization 정책을 먼저 추가한다.
+- 본문 migration은 `content text null`과 정제된 canonical HTML 저장을 정의하고, `PUBLISHED` 전환 시 비어 있지 않은 본문·허용 태그·허용 URL을 재검증한다.
 - API 구현 전 migration reset, seed idempotency, RLS·grant, version·unique partial index 검증을 완료한다.
 
 ## 추적 문서

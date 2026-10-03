@@ -19,7 +19,9 @@ Phase 5(Blog·Contact·Settings)를 구현하기 전에 관리자 화면 설계�
 - 기존 `/api/v1/**` Bearer JWT API는 유지하고, Phase 5는 현재 관리자 보안 필터가 사용하는 `/api/admin/**`, `/api/public/**` 경로를 사용한다.
 - 관리자 인증은 DB-backed opaque session cookie를 유지한다. CSRF 토큰은 도입하지 않고, 현재 구현된 unsafe method Origin 검증을 사용한다.
 - 문의 기준 테이블은 `public.inquiry`, 블로그는 `public.blog_post`, 사이트 설정은 `public.site_brand_config`로 고정한다.
-- 블로그 본문은 현재 migration에 컬럼이 없으므로 구현 전에 `content` 추가 migration을 적용한다.
+- 블로그 본문은 현재 migration에 컬럼이 없으므로 구현 전에 `content` 추가 migration을 적용한다. 허용 HTML·속성·URL scheme·100,000자 제한·저장/출력 이중 정제 정책은 `PHASE5-API-SPEC.md`에 고정했다.
+- 문의 목록·상세와 사이트 브랜드 조회·미리보기는 샘플 JSON 및 stale·summary·공개 필드 기준을 `PHASE5-API-SPEC.md`에 고정했다.
+- 공개 웹사이트용 발행 브랜드 조회는 `GET /api/public/site-brand`로 정의하고, 구현 시 SecurityConfiguration allowlist와 CORS를 함께 반영한다.
 
 ## 구현 전 필수 준비
 

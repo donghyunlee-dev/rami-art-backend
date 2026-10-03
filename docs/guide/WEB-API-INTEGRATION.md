@@ -509,6 +509,7 @@
 
 - 관리자 로그인은 `POST /api/admin/auth/sessions`이며 성공 시 `__Host-rami_admin_session` 쿠키를 저장한다.
 - 관리자 Blog·문의·사이트 브랜드 요청은 `/api/admin/**`, 공개 문의·공개 Blog 조회는 `/api/public/**`를 사용한다.
+- 공개 웹사이트가 발행 브랜드를 동적으로 읽을 때는 `GET /api/public/site-brand`를 사용하고, 응답에는 공개 브랜드 필드만 포함한다.
 - 관리자 변경 요청은 쿠키와 `Origin`을 함께 전송한다. CSRF 토큰과 Bearer JWT를 Phase 5 관리자 API에 추가하지 않는다.
 - 요청 실패 시 top-level `message`를 읽지 말고 `error.code`, `error.message`, `error.fieldErrors`, `requestId`를 사용한다.
 - 초안 저장·읽음·상태 변경·발행 요청에는 문서에 명시된 `Idempotency-Key`와 `version`을 그대로 전송한다.
