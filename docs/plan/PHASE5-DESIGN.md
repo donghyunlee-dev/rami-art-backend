@@ -6,6 +6,7 @@ Phase 5(Blog·Contact·Settings)를 구현하기 전에 관리자 화면 설계�
 
 ## 기준 문서
 
+- 백엔드 Phase 5 API 명세: [`PHASE5-API-SPEC.md`](../guide/PHASE5-API-SPEC.md)
 - 관리자 Blog 계약: [`blog-post.md`](https://github.com/donghyunlee-dev/v0-rami-art-studio-web/blob/master/docs/management/API/blog-post.md)
 - 관리자 문의 계약: [`inquiry.md`](https://github.com/donghyunlee-dev/v0-rami-art-studio-web/blob/master/docs/management/API/inquiry.md)
 - 사이트 브랜드 계약: [`site-brand.md`](https://github.com/donghyunlee-dev/v0-rami-art-studio-web/blob/master/docs/management/API/site-brand.md)
