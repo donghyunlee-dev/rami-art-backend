@@ -4,6 +4,10 @@
 >
 > Last updated: `2026-03-12`
 
+> Phase 5 개발 계약: [`PHASE5-API-SPEC.md`](./PHASE5-API-SPEC.md). Phase 5는 기존 `/api/v1/**` JWT API를 변경하지 않고 `/api/admin/**`, `/api/public/**` 경계를 사용한다.
+
+> 참고: 아래 기존 `/api/v1/admin/**` 클래스·갤러리 예시는 이전 통합 문서에서 남은 역사적 참고 내용이다. 신규 관리자 기능과 Phase 5 구현에는 사용하지 않고, 실제 관리자 경로는 컨트롤러 및 최신 명세의 `/api/admin/**`를 기준으로 한다.
+
 ## 1) Base Rules
 - Base URL (Local): `http://localhost:9000/api`
 - Base URL (Prod): `https://rami-art-backend.onrender.com/api`
@@ -500,3 +504,12 @@
 - `SUPABASE_SERVICE_KEY`
 - `SUPABASE_GALLERY_BUCKET`
   - default: `pub_rami_art_bucket`
+
+## 8) Phase 5 Integration Contract
+
+- 관리자 로그인은 `POST /api/admin/auth/sessions`이며 성공 시 `__Host-rami_admin_session` 쿠키를 저장한다.
+- 관리자 Blog·문의·사이트 브랜드 요청은 `/api/admin/**`, 공개 문의·공개 Blog 조회는 `/api/public/**`를 사용한다.
+- 관리자 변경 요청은 쿠키와 `Origin`을 함께 전송한다. CSRF 토큰과 Bearer JWT를 Phase 5 관리자 API에 추가하지 않는다.
+- 요청 실패 시 top-level `message`를 읽지 말고 `error.code`, `error.message`, `error.fieldErrors`, `requestId`를 사용한다.
+- 초안 저장·읽음·상태 변경·발행 요청에는 문서에 명시된 `Idempotency-Key`와 `version`을 그대로 전송한다.
+- Phase 5 API는 구현 전 계약이며 실제 연결은 백엔드 구현 및 E2E 통과 후 활성화한다.

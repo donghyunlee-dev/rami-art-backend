@@ -13,26 +13,26 @@ Phase 5(Blog·Contact·Settings)를 구현하기 전에 관리자 화면 설계�
 - 데이터 구조: [`DATA-SPEC.md`](../guide/DATA-SPEC.md)
 - 현재 구현 API: `docs/guide/API-SPEC.md`
 
-## 현재 확인 결과
+## 확정된 기준
 
-- Blog·Contact·Settings의 필드, 권한, 멱등성, 감사 로그, 동시성 규칙은 관리자 문서에 정의되어 있다.
-- 백엔드 `API-SPEC.md`는 현재 구현된 API만 기록하는 정책이므로 세 영역을 미구현으로 표시하고 있다.
-- 관리자 문서의 경로(`/admin/...`)와 백엔드 공통 계약의 버전 경로(`/api/v1/...`)가 다르다.
-- 따라서 상세 문서를 그대로 복사하지 않고, 백엔드 구현 시 `/api/v1/admin/...` 또는 공개 API의 최종 경로를 먼저 확정해야 한다.
+- Blog·Contact·Settings의 필드, 권한, 멱등성, 감사 로그, 동시성 규칙은 [`PHASE5-API-SPEC.md`](../guide/PHASE5-API-SPEC.md)에 백엔드 계약으로 정리했다.
+- 기존 `/api/v1/**` Bearer JWT API는 유지하고, Phase 5는 현재 관리자 보안 필터가 사용하는 `/api/admin/**`, `/api/public/**` 경로를 사용한다.
+- 관리자 인증은 DB-backed opaque session cookie를 유지한다. CSRF 토큰은 도입하지 않고, 현재 구현된 unsafe method Origin 검증을 사용한다.
+- 문의 기준 테이블은 `public.inquiry`, 블로그는 `public.blog_post`, 사이트 설정은 `public.site_brand_config`로 고정한다.
+- 블로그 본문은 현재 migration에 컬럼이 없으므로 구현 전에 `content` 추가 migration을 적용한다.
 
-## 구현 전 결정 사항
+## 구현 전 필수 준비
 
-- 관리자 Blog: `/api/v1/admin/blog-posts` 계열의 목록·초안·저장·미리보기·발행 경로 확정
-- 공개/관리자 문의: `/api/v1/public/inquiries`, `/api/v1/admin/inquiries` 계열 경로 확정
-- 사이트 설정: `/api/v1/admin/site-brand` 계열 경로와 공개 조회 제공 여부 확정
-- 공통 응답을 현재 백엔드 envelope(`success`, `data`, `message`, `error`)와 관리자 문서의 `requestId`, `fieldErrors` 규칙으로 통합
-- 세 영역의 migration, 권한, idempotency, audit, version 충돌 오류를 구현 계약에 반영
+- `public.blog_post.content` 추가 migration과 HTML sanitization 정책 적용
+- Phase 5 엔드포인트의 controller·service·repository·test 구현
+- `PHASE5-API-SPEC.md`의 오류 코드와 실제 `AdminGlobalExceptionHandler` 매핑 검증
+- `WEB-API-INTEGRATION.md`의 Phase 5 호출 규칙과 프론트엔드 E2E 예시 유지
 
 ## 완료 기준
 
-- 최종 경로와 HTTP method가 `docs/guide/API-SPEC.md`에 반영된다.
-- 요청·응답·오류·권한·데이터 출처가 각 엔드포인트별로 문서화된다.
-- `docs/guide/WEB-API-INTEGRATION.md`에 프론트엔드 호출 예시가 추가된다.
+- 최종 경로와 HTTP method는 `docs/guide/PHASE5-API-SPEC.md`에 반영되어 있다.
+- 요청·응답·오류·권한·데이터 출처가 각 엔드포인트별로 문서화되어 있다.
+- `docs/guide/WEB-API-INTEGRATION.md`에 Phase 5 호출 기준이 연결되어 있다.
 - 구현 후 `docs/test/`와 `docs/result/`에 실제 검증 결과를 기록한다.
 
 이 문서는 구현 완료를 의미하지 않으며, Phase 5 구현 전 계약 충돌을 방지하기 위한 백엔드 기준 문서다.

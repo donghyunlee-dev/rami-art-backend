@@ -66,9 +66,9 @@
 | Auth API | 구현 완료 |
 | Classes API | 구현 완료 |
 | Gallery API | 구현 완료 |
-| Blog API | 설계 정합화 중·미구현 |
-| Contact API | 설계 정합화 중·미구현 |
-| Settings API | 설계 정합화 중·미구현 |
+| Blog API | 계약 확정·미구현 |
+| Contact API | 계약 확정·미구현 |
+| Settings API | 계약 확정·미구현 |
 
 ## 인증 API
 
