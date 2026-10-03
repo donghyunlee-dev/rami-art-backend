@@ -106,6 +106,7 @@ class StaffPersistenceIntegrationTest {
         var created = staffService.createStaff(command, actorId, key, metadata);
         var replayed = staffService.createStaff(command, actorId, key, metadata);
         var page = staffService.findStaff("라미", "ACTIVE", "TEACHER", 0, 20);
+        assertThat(staffService.findStaff(null, null, null, 0, 20).content()).hasSize(1);
 
         assertThat(replayed.id()).isEqualTo(created.id());
         assertThat(created.phone()).isEqualTo("+821012345678");

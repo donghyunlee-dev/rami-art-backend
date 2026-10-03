@@ -24,10 +24,10 @@ import org.springframework.stereotype.Repository;
 public class JdbcStaffRepository implements StaffRepository {
 
     private static final String STAFF_FILTER = """
-            where (:keyword is null or s.staff_code ilike '%' || :keyword || '%'
+            where (cast(:keyword as text) is null or s.staff_code ilike '%' || :keyword || '%'
                    or s.name ilike '%' || :keyword || '%' or s.display_name ilike '%' || :keyword || '%')
-              and (:status is null or s.status = :status)
-              and (:job_title is null or s.job_title = :job_title)
+              and (cast(:status as text) is null or s.status = :status)
+              and (cast(:job_title as text) is null or s.job_title = :job_title)
             """;
 
     private final JdbcClient jdbcClient;

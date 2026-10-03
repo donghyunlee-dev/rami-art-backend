@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
@@ -53,7 +54,8 @@ public final class MediaService {
         String suffix = extension(image.mimeType());
         String storageKey = "public-media/" + PATH_MONTH.format(clock.instant()) + "/" + assetId + suffix;
         String publicPath = "/media/" + PATH_MONTH.format(clock.instant()) + "/" + assetId + suffix;
-        Instant expiresAt = clock.instant().plusSeconds(7 * 24 * 60 * 60L);
+        // PostgreSQL timestamps retain microseconds; first and replay responses must match.
+        Instant expiresAt = clock.instant().plusSeconds(7 * 24 * 60 * 60L).truncatedTo(ChronoUnit.MICROS);
         StoredAsset candidate = new StoredAsset(assetId, storageKey, publicPath, image.fileName(), image.sha256(),
                 image.mimeType(), image.bytes().length, image.width(), image.height(), expiresAt);
         boolean[] objectWritten = {false};

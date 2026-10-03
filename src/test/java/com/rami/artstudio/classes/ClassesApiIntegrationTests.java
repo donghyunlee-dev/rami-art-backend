@@ -23,6 +23,8 @@ import org.springframework.test.annotation.Rollback;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,12 +33,18 @@ import com.rami.artstudio.auth.infra.AdminRefreshTokenRepository;
 import com.rami.artstudio.auth.infra.AdminUserRepository;
 import com.rami.artstudio.classes.domain.ArtClass;
 import com.rami.artstudio.classes.infra.ArtClassRepository;
+import com.rami.artstudio.support.LegacyEmbeddedPostgres;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.flyway.enabled=true")
 @AutoConfigureMockMvc
 @Transactional
 @Rollback
 class ClassesApiIntegrationTests {
+
+    @DynamicPropertySource
+    static void configureDataSource(DynamicPropertyRegistry registry) {
+        LegacyEmbeddedPostgres.configure(registry, "legacy_classes_tests");
+    }
 
     private static final String EMAIL = "admin@ramiartstudio.com";
     private static final String PASSWORD = "ChangeMe123!";

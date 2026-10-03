@@ -21,6 +21,7 @@ import java.sql.Statement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -45,7 +46,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MediaPersistenceIntegrationTest {
     private static final EmbeddedPostgres POSTGRES = startPostgres();
-    private static final Instant NOW = Instant.parse("2026-09-20T00:00:00Z");
+    private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.SECONDS).plusNanos(123456789);
 
     @Autowired DataSource dataSource;
     @Autowired MediaService service;
@@ -101,7 +102,8 @@ class MediaPersistenceIntegrationTest {
         var replay = service.upload(png, "작품.png", "image/png", actor, key, metadata());
 
         assertThat(replay).isEqualTo(first);
-        assertThat(first.publicUrl()).startsWith("https://cdn.example.test/media/2026/09/");
+        assertThat(first.publicUrl())
+                .matches("https://cdn\\.example\\.test/media/\\d{4}/\\d{2}/[0-9a-f-]{36}\\.png");
         assertThat(first.toString()).doesNotContain("public-media").doesNotContain("sha256");
         assertThat(storage.objects).hasSize(1);
         assertThat(jdbc.queryForObject("select count(*) from media_asset where id=?", Integer.class, first.id())).isOne();
@@ -143,9 +145,10 @@ class MediaPersistenceIntegrationTest {
 
         storage.failWrites = false;
         var asset = service.upload(png(8, 8), "old.png", "image/png", actor, UUID.randomUUID(), metadata());
+        Instant cleanupTime = NOW;
         jdbc.update("update media_asset set created_at=?, expires_at=? where id=?",
-                java.sql.Timestamp.from(NOW.minusSeconds(8 * 24 * 60 * 60L)),
-                java.sql.Timestamp.from(NOW.minusSeconds(1)), asset.id());
+                java.sql.Timestamp.from(cleanupTime.minusSeconds(8 * 24 * 60 * 60L)),
+                java.sql.Timestamp.from(cleanupTime.minusSeconds(1)), asset.id());
         storage.failDeletes = true;
         assertThat(service.cleanupExpired(10)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from media_asset where id=?", Integer.class, asset.id())).isOne();

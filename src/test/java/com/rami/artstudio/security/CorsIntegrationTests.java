@@ -10,10 +10,19 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
-@SpringBootTest
+import com.rami.artstudio.support.LegacyEmbeddedPostgres;
+
+@SpringBootTest(properties = "spring.flyway.enabled=true")
 @AutoConfigureMockMvc
 class CorsIntegrationTests {
+
+    @DynamicPropertySource
+    static void configureDataSource(DynamicPropertyRegistry registry) {
+        LegacyEmbeddedPostgres.configure(registry, "legacy_cors_tests");
+    }
 
     @Autowired
     private MockMvc mockMvc;

@@ -1,17 +1,22 @@
 spring:
   application:
-    name: rami-art-studio-api
+    name: rami-art-studio-test
   datasource:
-    url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require&prepareThreshold=0&preferQueryMode=simple}
-    username: ${DB_USERNAME:postgres.gipaatdvbnmahvpwphtk}
-    password: ${DB_PASSWORD:!@!L1e2e34!!!}
+    # DynamicPropertySource replaces this with an isolated embedded PostgreSQL URL.
+    # Keep a local, non-listening fallback so accidental test configuration omissions
+    # cannot connect to a remote database.
+    url: jdbc:postgresql://127.0.0.1:1/rami_test
+    username: test
+    password: test
     driver-class-name: org.postgresql.Driver
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: none
   flyway:
-    enabled: true
+    # Admin persistence suites apply the canonical Supabase scripts themselves.
+    # Legacy API suites opt into this app's Flyway migrations at the test class.
+    enabled: false
     default-schema: rami_art_studio
     schemas: rami_art_studio
     locations: classpath:db/migration
@@ -21,13 +26,23 @@ spring:
 app:
   version: 0.0.1-SNAPSHOT
   storage:
-    supabase-url: https://test-project.supabase.co
-    service-key: test-service-key
-    gallery-bucket: pub_rami_art_bucket
+    supabase-url: https://test-project.invalid
+    service-key: test-only-service-key
+    gallery-bucket: test-gallery-bucket
   security:
-    jwt-secret: rami-art-studio-secret-key-change-this-in-production-2026
+    jwt-secret: test-only-jwt-signing-key-for-isolated-tests-2026
     access-token-expiration-seconds: 3600
     refresh-token-expiration-seconds: 1209600
-    bootstrap-admin-email: admin@ramiartstudio.com
-    bootstrap-admin-name: 원장
-    bootstrap-admin-password: ChangeMe123!
+    bootstrap-admin-email: admin@ramiartstudio.test
+    bootstrap-admin-name: Test Owner
+    bootstrap-admin-password: TestOnlyPassword123!
+
+admin:
+  security:
+    allowed-origin: http://localhost:3000
+    staff-phone-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    inquiry-data-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    student-data-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  media:
+    storage-root: build/test-media-storage
+    public-base-url: http://localhost:9000

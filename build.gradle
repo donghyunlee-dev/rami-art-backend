@@ -45,3 +45,11 @@ tasks.named('test') {
 springBoot {
 	mainClass = 'com.rami.artstudio.RamiArtBackendApplication'
 }
+
+// Development-only, ephemeral PostgreSQL; the canonical migrations stay at root.
+tasks.register('localDatabase', JavaExec) {
+	dependsOn testClasses
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.ramiart.admin.dev.LocalDatabaseLauncher'
+	workingDir = projectDir.parentFile
+}

@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+## Monorepo and deployment synchronization
+
+This project is developed in `backend/` inside the private
+`donghyunlee-dev/v0-rami-art-studio-web` repository. Render currently deploys
+the separate `donghyunlee-dev/rami-art-backend` repository. Every backend code
+change must be committed to the monorepo and then synchronized, committed, and
+pushed to the backend repository's `master` so Render receives it. Preserve
+that repository's Git history and `supabase/` tree; never force-push. Follow
+the authenticated local sync procedure in the monorepo's
+`docs/backend/MONOREPO-DEPLOYMENT.md`. GitHub Actions has no cross-repository
+credential and is not the sync mechanism.
+
 You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.
 
 ---

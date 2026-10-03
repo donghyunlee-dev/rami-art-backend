@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $legacyPath = Join-Path $Root 'src/main/resources/db/migration'
-$adminPath = Join-Path $Root 'supabase/migrations'
+$adminPath = Join-Path (Split-Path $Root -Parent) 'supabase/migrations'
 
 if (-not (Test-Path $legacyPath) -or -not (Test-Path $adminPath)) {
     throw "Migration directories are missing."

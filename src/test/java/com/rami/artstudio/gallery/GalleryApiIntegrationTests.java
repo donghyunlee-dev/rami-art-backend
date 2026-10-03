@@ -31,6 +31,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.mock.web.MockMultipartFile;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -44,13 +46,19 @@ import com.rami.artstudio.gallery.infra.GalleryCategoryRepository;
 import com.rami.artstudio.gallery.infra.GalleryWorkRepository;
 import com.rami.artstudio.gallery.storage.GalleryImageStorage;
 import com.rami.artstudio.gallery.storage.GalleryImageStorage.UploadedImage;
+import com.rami.artstudio.support.LegacyEmbeddedPostgres;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.flyway.enabled=true")
 @AutoConfigureMockMvc
 @Transactional
 @Rollback
 class GalleryApiIntegrationTests {
+
+    @DynamicPropertySource
+    static void configureDataSource(DynamicPropertyRegistry registry) {
+        LegacyEmbeddedPostgres.configure(registry, "legacy_gallery_tests");
+    }
 
     private static final String EMAIL = "admin@ramiartstudio.com";
     private static final String PASSWORD = "ChangeMe123!";

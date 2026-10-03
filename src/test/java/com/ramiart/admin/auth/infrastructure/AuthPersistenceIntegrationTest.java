@@ -3,7 +3,8 @@ package com.ramiart.admin.auth.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ramiart.admin.AdminApplication;
+import com.rami.artstudio.RamiArtBackendApplication;
+import com.rami.artstudio.support.LegacyFlywayTestBootstrap;
 import com.ramiart.admin.auth.application.AuthSessionException;
 import com.ramiart.admin.auth.application.AuthSessionRepository.RequestMetadata;
 import com.ramiart.admin.auth.application.AuthSessionService;
@@ -40,7 +41,9 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-@SpringBootTest(classes = AdminApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(classes = RamiArtBackendApplication.class,
+        properties = {"spring.flyway.enabled=true", "spring.jackson.property-naming-strategy=SNAKE_CASE"},
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthPersistenceIntegrationTest {
 
@@ -591,7 +594,9 @@ class AuthPersistenceIntegrationTest {
 
     private static EmbeddedPostgres startPostgres() {
         try {
-            return EmbeddedPostgres.builder().start();
+            EmbeddedPostgres postgres = EmbeddedPostgres.builder().start();
+            LegacyFlywayTestBootstrap.prepare(postgres.getPostgresDatabase());
+            return postgres;
         } catch (IOException exception) {
             throw new ExceptionInInitializerError(exception);
         }
