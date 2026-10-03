@@ -4,7 +4,7 @@
 >
 > 작성일 `2026-03-12`
 >
-> 이 문서는 현재 백엔드 코드에 실제 구현된 API만 기준으로 유지한다. Gallery, Blog, Contact, Settings 관련 API는 아직 미구현이며 본 문서 범위에서 제외한다.
+> 이 문서는 현재 백엔드 코드에 실제 구현된 API만 기준으로 유지한다. Blog, Contact, Settings의 상세 설계는 [`PHASE5-DESIGN.md`](../plan/PHASE5-DESIGN.md)에서 관리하며, 구현 전까지 이 문서의 구현 API 범위에는 포함하지 않는다.
 
 ## API 공통 규격
 
@@ -66,9 +66,9 @@
 | Auth API | 구현 완료 |
 | Classes API | 구현 완료 |
 | Gallery API | 구현 완료 |
-| Blog API | 미구현 |
-| Contact API | 미구현 |
-| Settings API | 미구현 |
+| Blog API | 설계 정합화 중·미구현 |
+| Contact API | 설계 정합화 중·미구현 |
+| Settings API | 설계 정합화 중·미구현 |
 
 ## 인증 API
 

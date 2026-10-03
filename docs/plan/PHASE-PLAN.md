@@ -44,6 +44,7 @@
   - 주요 조회/관리 API 및 검증 로직 동작
 
 ## Phase 5. Blog + Contact + Settings API
+- 설계 정합화 기준: [`PHASE5-DESIGN.md`](./PHASE5-DESIGN.md)
 - 범위
   - 블로그 게시글, 문의 관리, 사이트 설정 API
 - 완료 기준
