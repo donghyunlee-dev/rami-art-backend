@@ -15,11 +15,29 @@ Phase 5는 기존 시스템을 바꾸지 않고 관리자 전용 경계를 사�
 | 기존 공개·기본 API | `/api/v1/**` | Bearer JWT | 비활성화 | 기존 `SecurityConfig` 유지 |
 | 관리자·관리자 공개 API | `/api/admin/**`, `/api/public/**` | 관리자 API는 DB 세션 쿠키 | 비활성화 | `SecurityConfiguration`, `AdminSessionFilter`, `OriginValidationFilter` 유지 |
 
-- 관리자 로그인은 `POST /api/admin/auth/sessions`가 `__Host-rami_admin_session` HttpOnly·Secure·SameSite=Strict 쿠키를 발급한다.
+- 관리자 로그인은 `POST /api/admin/auth/sessions`가 `__Host-rami_admin_session` HttpOnly·Secure 쿠키를 발급한다. `SameSite`는 배포 형태에 따라 아래 표를 따른다.
 - 관리자 세션은 서블릿 세션이 아니라 `admin_session` 저장소를 조회하는 DB-backed opaque token이다. Spring Security의 `STATELESS` 설정은 유지한다.
 - 관리자 안전하지 않은 메서드(`POST`, `PUT`, `PATCH`, `DELETE`)는 `Origin`이 `admin.security.allowed-origin`과 같아야 한다. 현재 CSRF 토큰은 사용하지 않는다.
 - 공개 문의 `POST /api/public/inquiries`는 인증 없이 허용되며 rate limit·honeypot·동의 검증을 적용한다.
 - Phase 5 엔드포인트에는 Bearer JWT를 요구하지 않는다. `/api/v1/**`와 경로를 혼용하지 않는다.
+
+### 배포별 쿠키·CORS 결정
+
+| 환경 | 웹 Origin | API Origin | 사이트 관계 | Cookie SameSite | Fetch credentials |
+|---|---|---|---|---|---|
+| 로컬 | `http://localhost:3000` | `http://localhost:9000` | same-site | `Strict` | `include` |
+| 현재 운영 | `https://ramiartstudio.com` 또는 `https://rami-art-studio.vercel.app` | `https://rami-art-backend.onrender.com` | cross-site | `None` + `Secure` | `include` |
+| 권장 향후 구성 | `https://ramiartstudio.com` | `https://api.ramiartstudio.com` | same-site | `Strict` 가능 | `include` |
+
+현재 Render 도메인을 계속 사용하는 운영 환경에서는 `SameSite=Strict`를 사용하지 않는다. `Strict` 또는 `Lax` 쿠키는 `credentials: include`를 사용해도 cross-site 요청에 포함되지 않는다. [MDN Fetch credentials 안내](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch#including_credentials) 기준으로, 운영 쿠키는 `SameSite=None; Secure`로 발급해야 한다. `__Host-` 쿠키의 `Domain` 속성은 생략하고 `Path=/`는 유지한다.
+
+관리자 CORS는 현재 `/api/v1/**`용 `SecurityConfig`의 `allowCredentials=false` 설정과 분리한다.
+
+- 관리자 `/api/admin/**`: `Access-Control-Allow-Origin`은 `ADMIN_ALLOWED_ORIGINS`에 등록된 정확한 Origin 하나만 반사하고, `Access-Control-Allow-Credentials: true`, `Vary: Origin`을 반환한다. `*`는 금지한다.
+- 관리자 허용 Origin 기본 목록은 `https://ramiartstudio.com`, `https://rami-art-studio.vercel.app`이며 로컬 개발 시 `http://localhost:3000`을 별도로 추가한다.
+- 허용 메서드는 `GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE`, 허용 헤더는 `Content-Type, Idempotency-Key, X-Request-Id`이며 `X-Request-Id`를 expose한다.
+- 프론트엔드는 관리자 API 호출에 `credentials: "include"`를 사용하고, 공개 API 호출에는 `credentials: "omit"`를 사용한다.
+- 공개 `/api/public/**` GET·POST는 인증 쿠키를 사용하지 않으므로 `Access-Control-Allow-Credentials: false`로 별도 허용한다. 공개 endpoint도 동일한 명시적 Origin 목록과 `Vary: Origin`을 사용한다.
 
 ## 공통 응답·오류
 
@@ -97,7 +115,7 @@ Phase 5는 기존 시스템을 바꾸지 않고 관리자 전용 경계를 사�
 }
 ```
 
-`Set-Cookie`에 세션 쿠키를 담는다. 오류는 `AUTHENTICATION_FAILED(401)`, `ACCOUNT_LOCKED(423)`, `AUTH_RATE_LIMITED(429)`, `VALIDATION_ERROR(400)`이다.
+`Set-Cookie`에 세션 쿠키를 담는다. 로컬은 `SameSite=Strict`, 현재 운영은 `SameSite=None; Secure`를 사용한다. 오류는 `AUTHENTICATION_FAILED(401)`, `ACCOUNT_LOCKED(423)`, `AUTH_RATE_LIMITED(429)`, `VALIDATION_ERROR(400)`이다.
 
 ### 현재 세션·연장·로그아웃
 
@@ -171,7 +189,7 @@ Query: `keyword`(2~50자), `categories[]`(`CLASS_STORY|STUDIO_NEWS|ARTWORK_STORY
 
 `GET /api/public/blog-posts`
 
-인증 없음. Query `category`, `keyword`, `page`, `size`; `status=PUBLISHED AND visible=true`이며 `deleted_at` 대신 현재 테이블의 `status`와 publication immutable 규칙을 사용한다. 응답 item은 `postId`, `title`, `summary`, `content`, `category`, `media`, `publishedAt`만 공개한다.
+인증 없음. 현재 `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 구현 시 이 GET 경로를 `permitAll` allowlist에 명시적으로 추가한다. Query `category`, `keyword`, `page`, `size`; `status=PUBLISHED AND visible=true`이며 `deleted_at` 대신 현재 테이블의 `status`와 publication immutable 규칙을 사용한다. 응답 item은 `postId`, `title`, `summary`, `content`, `category`, `media`, `publishedAt`만 공개한다. 웹 Origin에서 직접 호출할 경우 공개 CORS 정책을 적용하고 credentials는 사용하지 않는다.
 
 ## 문의
 
@@ -364,7 +382,7 @@ POST /api/admin/site-brand/preview
 
 `GET /api/public/site-brand`
 
-공개 웹사이트가 동적으로 브랜드 설정을 읽을 수 있도록 제공한다. 인증과 Origin 검증은 없고, `status=PUBLISHED`인 최신 revision만 반환한다. 이 endpoint를 활성화할 때 `SecurityConfiguration`의 GET allowlist와 CORS 정책을 함께 추가한다.
+공개 웹사이트가 동적으로 브랜드 설정을 읽을 수 있도록 제공한다. 인증과 Origin 검증은 없고, `status=PUBLISHED`인 최신 revision만 반환한다. 현재 `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 구현 시 이 GET 경로를 `permitAll` allowlist에 명시적으로 추가하고, 공개 CORS 정책(`allowCredentials=false`)을 함께 추가한다.
 
 공개 응답은 내부 ID·version·작성자·초안을 제외한다.
 

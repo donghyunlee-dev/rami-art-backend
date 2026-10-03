@@ -510,7 +510,11 @@
 - 관리자 로그인은 `POST /api/admin/auth/sessions`이며 성공 시 `__Host-rami_admin_session` 쿠키를 저장한다.
 - 관리자 Blog·문의·사이트 브랜드 요청은 `/api/admin/**`, 공개 문의·공개 Blog 조회는 `/api/public/**`를 사용한다.
 - 공개 웹사이트가 발행 브랜드를 동적으로 읽을 때는 `GET /api/public/site-brand`를 사용하고, 응답에는 공개 브랜드 필드만 포함한다.
+- 현재 운영 배포(`ramiartstudio.com` 또는 `rami-art-studio.vercel.app` → `rami-art-backend.onrender.com`)는 cross-site 호출이므로 세션 쿠키가 `SameSite=None; Secure; HttpOnly; Path=/`여야 한다. 로컬 프론트엔드·API 호출은 same-site이므로 `SameSite=Strict`를 사용한다.
+- 관리자 로그인·조회·변경 요청은 `credentials: "include"`와 정확한 `Origin`을 함께 전송한다. 서버는 `ADMIN_ALLOWED_ORIGINS`에 등록된 Origin만 `Access-Control-Allow-Origin`으로 되돌리고 `Access-Control-Allow-Credentials: true`를 반환한다. `*`와 자격 증명 응답을 함께 사용하지 않는다.
+- 공개 블로그·브랜드·문의 호출은 인증 쿠키를 보내지 않으므로 `credentials: "omit"`를 사용한다. 공개 CORS는 명시된 웹 Origin만 허용하고 `Access-Control-Allow-Credentials: false`로 응답한다.
 - 관리자 변경 요청은 쿠키와 `Origin`을 함께 전송한다. CSRF 토큰과 Bearer JWT를 Phase 5 관리자 API에 추가하지 않는다.
+- 보안 기본값이 `anyRequest().denyAll()`이므로 `GET /api/public/blog-posts`와 `GET /api/public/site-brand`를 `permitAll` allowlist에 명시해야 한다. 이 경로가 누락되면 공개 웹사이트 호출은 인증 없이 403이 된다.
 - 요청 실패 시 top-level `message`를 읽지 말고 `error.code`, `error.message`, `error.fieldErrors`, `requestId`를 사용한다.
 - 초안 저장·읽음·상태 변경·발행 요청에는 문서에 명시된 `Idempotency-Key`와 `version`을 그대로 전송한다.
 - Phase 5 API는 구현 전 계약이며 실제 연결은 백엔드 구현 및 E2E 통과 후 활성화한다.
