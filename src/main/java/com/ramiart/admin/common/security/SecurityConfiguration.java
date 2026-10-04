@@ -51,6 +51,8 @@ public class SecurityConfiguration {
                                 "/api/public/site-brand").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/blog-posts", "/api/admin/blog-posts/**")
                                 .hasAuthority("BLOG_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/summary")
+                                .authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/admin/blog-posts")
                                 .hasAuthority("BLOG_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/blog-posts/*/drafts")

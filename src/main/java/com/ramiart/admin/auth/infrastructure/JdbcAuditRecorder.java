@@ -22,11 +22,22 @@ public class JdbcAuditRecorder implements AuditRecorder {
         jdbcClient.sql("""
                         insert into audit_log (
                             occurred_at, request_id, task_id, event_class, actor_type,
-                            actor_id, actor_display, action, target_type, target_id,
+                            actor_id, actor_display, action, target_type, target_id, target_display,
                             result, reason_code, ip_address, user_agent, details
                         ) values (
                             :occurred_at, :request_id, :task_id, :event_class, :actor_type,
-                            :actor_id, :actor_display, :action, :target_type, :target_id,
+                            :actor_id, coalesce(:actor_display, (select display_name from admin_user where id=:actor_id)),
+                            :action, :target_type, :target_id,
+                            case :target_type
+                              when 'STUDENT' then coalesce((select left(student_name,1) || repeat('•', greatest(char_length(student_name)-1,1)) from student where id=:target_id), '원생')
+                              when 'INQUIRY' then '문의'
+                              when 'ENROLLMENT_CASE' then '상담 등록'
+                              when 'ATTENDANCE_SESSION' then coalesce((select class_name_snapshot from attendance_session where id=:target_id), '출석 세션')
+                              when 'TUITION_BILLING' then '수업료 청구'
+                              when 'ADMIN_USER' then '관리자 계정'
+                              when 'MONTHLY_SCHEDULE' then coalesce((select year_month from monthly_schedule where id=:target_id), '월간 시간표')
+                              else null
+                            end,
                             :result, :reason_code, cast(:ip_address as inet), :user_agent,
                             cast(:details as jsonb)
                         )
