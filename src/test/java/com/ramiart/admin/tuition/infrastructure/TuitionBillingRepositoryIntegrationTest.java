@@ -1,0 +1,223 @@
+package com.ramiart.admin.tuition.infrastructure;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
+import com.ramiart.admin.tuition.application.TuitionBillingRepository;
+import com.ramiart.admin.tuition.application.TuitionBillingService;
+import com.ramiart.admin.tuition.application.TuitionBillingBatchRepository;
+import com.ramiart.admin.tuition.application.TuitionBillingBatchService;
+import com.ramiart.admin.tuition.application.TuitionPaymentService;
+import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.DisplayName;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class TuitionBillingRepositoryIntegrationTest {
+    private static final EmbeddedPostgres POSTGRES = startPostgres();
+    private final DataSource dataSource = POSTGRES.getPostgresDatabase();
+    private JdbcTemplate jdbc;
+    private TuitionBillingRepository repository;
+    private UUID actorId;
+    private UUID studentId;
+    private UUID billingId;
+    private UUID assignmentId;
+
+    @BeforeAll
+    void applyCanonicalSchemaAndInsertDisposableBilling() throws Exception {
+        jdbc = new JdbcTemplate(dataSource);
+        try (Connection connection=dataSource.getConnection(); Statement statement=connection.createStatement()) {
+            createRoleIfMissing(statement,"anon"); createRoleIfMissing(statement,"authenticated");
+            statement.execute("drop schema if exists public cascade"); statement.execute("drop schema if exists extensions cascade");
+            statement.execute("create schema public"); statement.execute("create schema extensions");
+        }
+        Path root=projectRoot();
+        try (var migrations=Files.list(root.resolve("supabase/migrations"))) {
+            for (Path migration:migrations.filter(path -> path.toString().endsWith(".sql")).sorted().toList())
+                PostgresScriptRunner.execute(dataSource,migration);
+        }
+        PostgresScriptRunner.execute(dataSource,root.resolve("supabase/seed.sql"));
+        actorId=jdbc.queryForObject("select id from admin_user order by email limit 1",UUID.class);
+        studentId=UUID.randomUUID(); billingId=UUID.randomUUID();
+        UUID policyId=UUID.randomUUID(),itemId=UUID.randomUUID(),batchId=UUID.randomUUID();
+        assignmentId=UUID.randomUUID();
+        LocalDate today=LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        jdbc.update("insert into student(id,student_name,student_name_search,joined_at,status,created_by,updated_by) values(?,?,?,?,'ACTIVE',?,?)",
+                studentId,"통합 청구 원생","통합청구원생",today.minusYears(8),actorId,actorId);
+        jdbc.update("insert into tuition_policy(id,year,revision,status,default_due_day,created_by) values(?, ?,1,'DRAFT',25,?)",
+                policyId,today.getYear(),actorId);
+        jdbc.update("insert into tuition_policy_item(id,tuition_policy_id,lesson_count_per_week,monthly_amount) values(?,?,2,180000)",itemId,policyId);
+        jdbc.update("update tuition_policy set status='PUBLISHED',published_by=?,published_at=statement_timestamp() where id=?",actorId,policyId);
+        jdbc.update("insert into student_tuition_assignment(id,student_id,policy_item_id,effective_from,created_by,updated_by) values(?,?,?,?,?,?)",
+                assignmentId,studentId,itemId,today.minusMonths(1).withDayOfMonth(1),actorId,actorId);
+        jdbc.update("insert into tuition_billing_batch(id,year_month,requested_count,created_count,existing_count,failed_count,created_amount,status,requested_by,completed_at,idempotency_scope,idempotency_key,request_hash) values(?,?,1,1,0,0,180000,'COMPLETED',?,statement_timestamp(),?,?,repeat('a',64))",
+                batchId,today.minusMonths(1).withDayOfMonth(1).toString().substring(0,7),actorId,"integration-test:"+actorId,UUID.randomUUID());
+        String billingMonth=today.minusMonths(1).toString().substring(0,7);
+        LocalDate dueDate=today.minusMonths(1).withDayOfMonth(25);
+        jdbc.update("""
+                insert into tuition_billing(id,billing_batch_id,student_id,year_month,tuition_assignment_id,policy_item_id,
+                    billed_amount,adjustment_amount,paid_amount,refunded_amount,due_date,payment_status,issued_by,
+                    assignment_version,override_amount_snapshot,override_reason_snapshot,version)
+                values(?,?,?,?,?,?,180000,-10000,50000,0,?,'PARTIALLY_PAID',?,0,null,null,3)
+                """,billingId,batchId,studentId,billingMonth,assignmentId,itemId,dueDate,actorId);
+        jdbc.update("update student_tuition_assignment set version=7 where id=?",assignmentId);
+        repository=new JdbcTuitionBillingRepository(JdbcClient.create(dataSource));
+    }
+
+    @AfterAll void stopPostgres() throws IOException { POSTGRES.close(); }
+
+    @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T015/T017 overdue filter and month summary")
+    void overdueFilterAndSummaryUseAdjustmentAndRefundAwareBalance() {
+        LocalDate today=LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        var page=repository.list(null,true,List.of("OVERDUE"),today.minusMonths(24).withDayOfMonth(1),today,today,20,0);
+        var summary=repository.summarize(null,true,List.of("OVERDUE"),today.minusMonths(24).withDayOfMonth(1),today,today);
+        var count=repository.count(null,true,List.of("OVERDUE"),today.minusMonths(24).withDayOfMonth(1),today,today);
+        assertThat(page).hasSize(1);
+        assertThat(page.getFirst().billingId()).isEqualTo(billingId);
+        assertThat(page.getFirst().balance()).isEqualTo(120000);
+        assertThat(summary).containsEntry("count",1L).containsEntry("chargeAmount",170000L)
+                .containsEntry("netPaidAmount",50000L).containsEntry("balance",120000L);
+        assertThat(count).isEqualTo(1);
+    }
+
+    @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T018 billing detail preserves issue snapshots")
+    void billingDetailReturnsIssuedPolicyAndAssignmentSnapshots() {
+        var detail=repository.detail(billingId).orElseThrow();
+        assertThat(detail.row().studentId()).isEqualTo(studentId);
+        assertThat(detail.row().baseAmount()).isEqualTo(180000);
+        assertThat(detail.row().adjustmentAmount()).isEqualTo(-10000);
+        assertThat(detail.assignmentId()).isNotNull();
+        assertThat(detail.assignmentVersion()).isZero();
+        assertThat(detail.issuerId()).isEqualTo(actorId);
+        assertThat(detail.batchId()).isNotNull();
+    }
+
+    @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T001 preview uses assignment price and expires in five minutes")
+    void previewReturnsRealAssignmentPricingAndAnOpaqueShortLivedVersion() {
+        LocalDate today=LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        var protector=new com.ramiart.admin.tuition.infrastructure.AesGcmTuitionPreviewSnapshotProtector("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var service=new TuitionBillingService(repository,protector,java.time.Clock.systemUTC(),"Asia/Seoul");
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_BILLING_READ","TUITION_BILLING_WRITE");
+        var preview=service.preview(today.toString().substring(0,7),authentication);
+        assertThat(preview.candidates()).hasSize(1);
+        assertThat(preview.candidates().getFirst()).containsEntry("studentId",studentId)
+                .containsEntry("amount",180000L).containsEntry("selectedByDefault",true);
+        assertThat(preview.excluded()).isEmpty();
+        assertThat(preview.totals()).containsEntry("selectedCount",1).containsEntry("amount",180000L);
+        UUID token=UUID.fromString(preview.previewVersion());
+        var saved=repository.findPreview(TuitionBillingService.previewScope(actorId.toString(),java.time.YearMonth.from(today)),
+                token,preview.expiresAt().minusSeconds(1)).orElseThrow();
+        assertThat(saved.requestHash()).hasSize(64);
+        assertThat(protector.decrypt(saved.encryptedResponse())).contains(studentId.toString()).doesNotContain("통합 청구 원생");
+        assertThat(java.time.Duration.between(saved.expiresAt(),preview.expiresAt()).abs().toMillis()).isLessThan(1L);
+        assertThat(repository.findPreview(TuitionBillingService.previewScope(actorId.toString(),java.time.YearMonth.from(today)),
+                token,preview.expiresAt())).isEmpty();
+        var verified=service.verifyPreviewToken(preview.yearMonth(),token,List.of(studentId),authentication);
+        assertThat(verified.get(studentId).amount()).isEqualTo(180000);
+        var otherAdmin=new TestingAuthenticationToken(UUID.randomUUID().toString(),"","TUITION_BILLING_WRITE");
+        assertThatThrownBy(()->service.verifyPreviewToken(preview.yearMonth(),token,List.of(studentId),otherAdmin))
+                .isInstanceOf(TuitionBillingService.BillingException.class).extracting("code").isEqualTo("BILLING_PREVIEW_CHANGED");
+        jdbc.update("update student_tuition_assignment set version=8 where id=?",assignmentId);
+        assertThatThrownBy(()->service.verifyPreviewToken(preview.yearMonth(),token,List.of(studentId),authentication))
+                .isInstanceOf(TuitionBillingService.BillingException.class).extracting("code").isEqualTo("BILLING_PREVIEW_CHANGED");
+    }
+
+    @Test @DisplayName("MGT-TUITION-PAYMENT-RECORD-T004/T005 payment create and cancel reconcile billing and ledger")
+    void paymentCreateReplayAndCancellationReconcileBillingAndLedger() {
+        var paymentRepository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionPaymentRepository(JdbcClient.create(dataSource));
+        var service=new TuitionPaymentService(paymentRepository,
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),
+                java.time.Clock.systemUTC());
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE");
+        var metadata=new TuitionPaymentService.Metadata("payment-it","127.0.0.1","test");
+        var paymentTransactions=new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        var initial=service.list(billingId,null,20,authentication);
+        assertThat((List<?>)initial.get("payments")).isEmpty();
+        assertThat(((Map<?,?>)initial.get("billing")).get("balance")).isEqualTo(120000L);
+        var key=UUID.randomUUID();
+        var request=new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,3);
+        var created=paymentTransactions.execute(status->service.create(billingId,request,key,metadata,authentication));
+        var payment=(Map<?,?>)created.get("payment");
+        UUID paymentId=(UUID)payment.get("paymentId");
+        assertThat(payment.get("status")).isEqualTo("CONFIRMED");
+        assertThat(((Map<?,?>)created.get("billing")).get("version")).isEqualTo(4L);
+        assertThat(jdbc.queryForObject("select paid_amount from tuition_billing where id=?",Long.class,billingId)).isEqualTo(51000L);
+        assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_PAYMENT' and source_id=? and status='CONFIRMED'",Integer.class,paymentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select a.type from financial_entry e join finance_account a on a.id=e.account_id where e.source_id=?",String.class,paymentId)).isEqualTo("CASH");
+        assertThat(((List<?>)service.list(billingId,null,20,authentication).get("payments"))).hasSize(1);
+        var replay=paymentTransactions.execute(status->service.create(billingId,request,key,metadata,authentication));
+        assertThat(((Map<?,?>)replay.get("payment")).get("paymentId")).isEqualTo(paymentId);
+        assertThat(jdbc.queryForObject("select count(*) from tuition_payment where id=?",Integer.class,paymentId)).isEqualTo(1);
+        var cancelled=paymentTransactions.execute(status->service.cancel(paymentId,new TuitionPaymentService.CancelRequest("중복 등록 정정",0,4),UUID.randomUUID(),metadata,authentication));
+        assertThat(((Map<?,?>)cancelled.get("payment")).get("status")).isEqualTo("CANCELLED");
+        assertThat(((Map<?,?>)cancelled.get("billing")).get("version")).isEqualTo(5L);
+        assertThat(jdbc.queryForObject("select paid_amount from tuition_billing where id=?",Long.class,billingId)).isEqualTo(50000L);
+        assertThat(jdbc.queryForObject("select status from financial_entry where source_id=?",String.class,paymentId)).isEqualTo("CANCELLED");
+    }
+
+    @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T005/T009/T010 batch issuance and idempotent replay")
+    void selectedBatchIssuesOnceAndPersistsAuditAndReplayResult() {
+        var protector=new com.ramiart.admin.tuition.infrastructure.AesGcmTuitionPreviewSnapshotProtector("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        var billingService=new TuitionBillingService(repository,protector,java.time.Clock.systemUTC(),"Asia/Seoul");
+        TuitionBillingBatchRepository batchRepository=new JdbcTuitionBillingBatchRepository(JdbcClient.create(dataSource),
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()));
+        var transactions=new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);
+        var batchService=new TuitionBillingBatchService(batchRepository,billingService,transactions,java.time.Clock.systemUTC(),"Asia/Seoul");
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_BILLING_READ","TUITION_BILLING_WRITE");
+        LocalDate today=LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        String yearMonth=java.time.YearMonth.from(today).plusMonths(1).toString();
+        var preview=billingService.preview(yearMonth,authentication);
+        UUID key=UUID.randomUUID();
+        var request=new TuitionBillingBatchService.Request(yearMonth,List.of(studentId),preview.previewVersion());
+        var metadata=new TuitionBillingBatchService.RequestMetadata("req_billing_batch_test","127.0.0.1","integration-test");
+        var issued=batchService.issue(request,key,metadata,authentication);
+        assertThat(issued).containsEntry("status","COMPLETED");
+        var totals=(Map<?,?>)issued.get("totals");
+        assertThat(totals.get("created")).isEqualTo(1);
+        assertThat(totals.get("failed")).isEqualTo(0);
+        assertThat(totals.get("createdAmount")).isEqualTo(180000L);
+        assertThat(jdbc.queryForObject("select count(*) from tuition_billing where student_id=? and year_month=?",Integer.class,studentId,yearMonth)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where action='TUITION_BILLING_ISSUED'",Integer.class)).isEqualTo(1);
+        var replay=batchService.issue(request,key,metadata,authentication);
+        assertThat(replay).isEqualTo(issued);
+        assertThatThrownBy(()->batchService.issue(new TuitionBillingBatchService.Request(yearMonth,List.of(UUID.randomUUID()),preview.previewVersion()),
+                key,metadata,authentication)).isInstanceOf(TuitionBillingService.BillingException.class)
+                .extracting("code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
+    }
+
+    private static Path projectRoot() {
+        Path current=Path.of("").toAbsolutePath().normalize();
+        while(current!=null && !Files.isDirectory(current.resolve("supabase/migrations"))) current=current.getParent();
+        if(current==null) throw new IllegalStateException("supabase migrations directory not found");
+        return current;
+    }
+    private static EmbeddedPostgres startPostgres() {
+        try { return EmbeddedPostgres.builder().start(); }
+        catch(IOException exception) { throw new ExceptionInInitializerError(exception); }
+    }
+    private static void createRoleIfMissing(Statement statement,String role) throws SQLException {
+        try(var rows=statement.executeQuery("select exists(select 1 from pg_roles where rolname='"+role+"')")) {
+            rows.next(); if(!rows.getBoolean(1)) statement.execute("create role "+role);
+        }
+    }
+}
