@@ -49,9 +49,13 @@
   - 블로그 게시글, 문의 관리, 사이트 설정 API
 - 완료 기준
   - PRD P0 기능 우선 반영
+- 구현·격리 DB 검증 증적: [`2026-10-04-phase5-backend-api-result.md`](../result/2026-10-04-phase5-backend-api-result.md), [`2026-10-04-phase5-backend-api-test.md`](../test/2026-10-04-phase5-backend-api-test.md)
+- 운영 schema migration·Render 배포·운영 API 검증은 별도 완료 증적으로 확인한다.
 
 ## Phase 6. Hardening & QA
 - 범위
   - 입력 검증 고도화, 로깅/모니터링, 문서 보강
 - 완료 기준
   - 핵심 API 회귀 테스트 통과
+- 구현·회귀 테스트 증적: [`2026-10-04-phase6-hardening-qa-result.md`](../result/2026-10-04-phase6-hardening-qa-result.md), [`2026-10-04-phase6-hardening-qa-test.md`](../test/2026-10-04-phase6-hardening-qa-test.md)
+- 운영 배포 및 실서비스 검증은 배포 상태와 실제 요청 결과를 확인한 뒤 기록한다.
