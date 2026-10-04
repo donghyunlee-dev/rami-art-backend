@@ -130,6 +130,39 @@ class AttendancePersistenceIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from makeup_case where origin_session_id=?", Integer.class, otherSessionId)).isOne();
     }
 
+    @Test
+    void attendanceDateReadRequiresPermissionAndRejectsUnknownFilters() {
+        UUID sessionId=insertAttendanceFixture("권한 확인 반");
+        var readOnlyStudent=new TestingAuthenticationToken(actorId.toString(),"","STUDENT_READ");
+        assertThatThrownBy(()->attendanceService.find(LocalDate.now(ZoneId.of("Asia/Seoul")),"ALL",readOnlyStudent))
+                .isInstanceOf(AttendanceException.class).extracting("code").isEqualTo("ATTENDANCE_READ_DENIED");
+        var reader=new TestingAuthenticationToken(actorId.toString(),"","ATTENDANCE_READ");
+        assertThatThrownBy(()->attendanceService.find(LocalDate.now(ZoneId.of("Asia/Seoul")),"UNKNOWN",reader))
+                .isInstanceOf(AttendanceException.class).extracting("code").isEqualTo("VALIDATION_ERROR");
+        assertThat(attendanceService.find(LocalDate.now(ZoneId.of("Asia/Seoul")),"ALL",reader).sessions())
+                .extracting(session->session.id()).contains(sessionId);
+    }
+
+    @Test
+    void closingIncompleteAttendanceReturnsStudentDetails() {
+        UUID sessionId = insertAttendanceFixture("미완료 마감 검증 반");
+        var closeAuth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_CLOSE");
+        var metadata = new RequestMetadata("req_attendance_incomplete", "127.0.0.1", "integration-test");
+
+        assertThatThrownBy(() -> attendanceService.close(sessionId, new CloseWrite(0), closeAuth, UUID.randomUUID(), metadata))
+                .isInstanceOf(AttendanceException.class)
+                .satisfies(exception -> {
+                    AttendanceException attendanceException = (AttendanceException) exception;
+                    assertThat(attendanceException.code()).isEqualTo("ATTENDANCE_INCOMPLETE");
+                    assertThat(attendanceException.details()).containsKey("students");
+                    assertThat((java.util.List<?>) attendanceException.details().get("students")).hasSize(1);
+                    var student = (java.util.Map<?, ?>) ((java.util.List<?>) attendanceException.details().get("students")).getFirst();
+                    assertThat(student.get("studentId")).isNotNull();
+                    assertThat(student.get("studentName")).isEqualTo("통합 검증 원생");
+                    assertThat(student.get("missingFields")).isEqualTo(java.util.List.of("status"));
+                });
+    }
+
     private UUID insertAttendanceFixture(String className) {
         UUID courseId = UUID.randomUUID();
         UUID groupId = UUID.randomUUID();

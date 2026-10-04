@@ -29,10 +29,13 @@ public class AttendanceService {
     public AttendanceService(AttendanceRepository repository, AuditRecorder audit) { this.repository = repository; this.audit = audit; }
 
     public Day find(LocalDate date, String filter, Authentication authentication) {
+        if (!has(authentication, "ATTENDANCE_READ")) throw new AttendanceException("ATTENDANCE_READ_DENIED");
+        String selectedFilter=filter==null?"ALL":filter.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("ALL","PENDING").contains(selectedFilter)) throw new AttendanceException("VALIDATION_ERROR");
         LocalDate today = LocalDate.now(STUDIO_ZONE);
         if (date.isBefore(today.minusDays(31)) || date.isAfter(today.plusDays(31)))
             throw new AttendanceException("ATTENDANCE_DATE_OUT_OF_RANGE");
-        boolean pendingOnly = "PENDING".equalsIgnoreCase(filter);
+        boolean pendingOnly = "PENDING".equals(selectedFilter);
         boolean canWrite = has(authentication, "ATTENDANCE_WRITE");
         boolean canClose = has(authentication, "ATTENDANCE_CLOSE");
         Map<UUID, List<AttendanceRepository.StudentRow>> grouped = new LinkedHashMap<>();
@@ -134,7 +137,12 @@ public class AttendanceService {
         if (session.version() != command.version()) throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
         List<TargetState> targets = repository.findTargets(sessionId);
         if (targets.isEmpty()) throw new AttendanceException("ATTENDANCE_EMPTY_SESSION");
-        if (targets.stream().anyMatch(target -> target.attendanceId() == null)) throw new AttendanceException("ATTENDANCE_INCOMPLETE");
+        List<Map<String,Object>> invalid=targets.stream().map(target->missingFields(target,session)).filter(value->!value.get("missingFields").equals(List.of()))
+                .limit(100).toList();
+        if(!invalid.isEmpty()){
+            boolean incomplete=invalid.stream().anyMatch(value->((List<?>)value.get("missingFields")).contains("status"));
+            throw new AttendanceException(incomplete?"ATTENDANCE_INCOMPLETE":"ATTENDANCE_DETAIL_REQUIRED",Map.of("students",invalid));
+        }
         Summary summary = summary(targets);
         OffsetDateTime now = java.time.OffsetDateTime.now(STUDIO_ZONE).truncatedTo(ChronoUnit.SECONDS);
         if (repository.closeSession(sessionId, command.version(), actorId, now, summary) != 1)
@@ -167,6 +175,19 @@ public class AttendanceService {
             default -> throw new AttendanceException("ATTENDANCE_INCOMPLETE");
         }
         return new Summary(targets.size(), present, late, absent, excused, 0);
+    }
+
+    private static Map<String,Object> missingFields(TargetState target,SessionState session){
+        List<String> fields=new ArrayList<>();String status=target.status();
+        if(target.attendanceId()==null||status==null)fields.add("status");
+        else switch(status){
+            case "PRESENT"->{if(target.checkInTime()!=null)fields.add("checkInTime");if(target.reason()!=null)fields.add("reason");}
+            case "LATE"->{if(target.checkInTime()==null)fields.add("checkInTime");else{LocalTime earliest=session.startsAt().atZoneSameInstant(STUDIO_ZONE).toLocalTime().minusHours(2);LocalTime latest=session.endsAt().atZoneSameInstant(STUDIO_ZONE).toLocalTime();if(target.checkInTime().isBefore(earliest)||target.checkInTime().isAfter(latest))fields.add("checkInTime");}if(target.reason()!=null)fields.add("reason");}
+            case "ABSENT","EXCUSED"->{if(target.reason()==null||target.reason().trim().isEmpty()||target.reason().trim().length()>200)fields.add("reason");if(target.checkInTime()!=null)fields.add("checkInTime");}
+            default->fields.add("status");
+        }
+        if(target.makeupEligible()&&(!Set.of("ABSENT","EXCUSED").contains(status)||session.makeupValidDays()==0))fields.add("makeupEligible");
+        return Map.of("studentId",target.studentId(),"studentName",target.studentName(),"missingFields",fields);
     }
 
     private static void validate(AttendanceWrite command) {
@@ -217,5 +238,5 @@ public class AttendanceService {
 
     public record RequestMetadata(String requestId, String ipAddress, String userAgent) {}
     private static boolean has(Authentication authentication, String authority) { return authentication != null && authentication.getAuthorities().stream().anyMatch(value -> authority.equals(value.getAuthority())); }
-    public static final class AttendanceException extends RuntimeException { private final String code; public AttendanceException(String code) { this.code = code; } public String code() { return code; } }
+    public static final class AttendanceException extends RuntimeException { private final String code; private final Map<String,Object> details; public AttendanceException(String code) { this(code,Map.of()); } public AttendanceException(String code,Map<String,Object> details) { this.code = code; this.details=Map.copyOf(details); } public String code() { return code; } public Map<String,Object> details(){return details;} }
 }

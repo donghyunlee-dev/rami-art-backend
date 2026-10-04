@@ -10,12 +10,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.springframework.http.*;
+import org.springframework.dao.DataAccessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/admin/attendance-sessions")
 public final class AttendanceController {
+    private static final Logger LOG=LoggerFactory.getLogger(AttendanceController.class);
     private final AttendanceService service;
     public AttendanceController(AttendanceService service) { this.service = service; }
     @GetMapping
@@ -55,9 +59,17 @@ public final class AttendanceController {
             case "ATTENDANCE_TARGET_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "ATTENDANCE_VERSION_CONFLICT", "ATTENDANCE_SESSION_CLOSED", "ATTENDANCE_SESSION_CANCELLED", "IDEMPOTENCY_KEY_REUSED" -> HttpStatus.CONFLICT;
             case "ATTENDANCE_DETAIL_REQUIRED", "ATTENDANCE_EMPTY_SESSION", "ATTENDANCE_INCOMPLETE", "ATTENDANCE_MAKEUP_NOT_ALLOWED" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case "ATTENDANCE_SAVE_FAILED", "ATTENDANCE_CLOSE_FAILED" -> HttpStatus.INTERNAL_SERVER_ERROR;
             default -> HttpStatus.BAD_REQUEST;
         };
-        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(
-                ApiEnvelope.failure(exception.code(), "출석 정보를 처리할 수 없습니다.", java.util.List.of(), RequestIdFilter.get(request)));
+        java.util.Map<String,Object> error=new java.util.LinkedHashMap<>();error.put("code",exception.code());error.put("message","출석 정보를 처리할 수 없습니다.");if(!exception.details().isEmpty())error.put("details",exception.details());
+        java.util.Map<String,Object> body=new java.util.LinkedHashMap<>();body.put("success",false);body.put("data",null);body.put("error",error);body.put("requestId",RequestIdFilter.get(request));
+        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(body);
+    }
+    @ExceptionHandler(DataAccessException.class)
+    ResponseEntity<ApiEnvelope<Void>> persistence(DataAccessException exception,HttpServletRequest request){
+        String code="PUT".equals(request.getMethod())?"ATTENDANCE_SAVE_FAILED":"ATTENDANCE_CLOSE_FAILED";
+        LOG.error("Attendance persistence failed: requestId={}, method={}, path={}",RequestIdFilter.get(request),request.getMethod(),request.getRequestURI());
+        return ResponseEntity.internalServerError().cacheControl(CacheControl.noStore()).body(ApiEnvelope.failure(code,"출석 정보를 처리하지 못했습니다.",java.util.List.of(),RequestIdFilter.get(request)));
     }
 }
