@@ -175,6 +175,27 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select status from financial_entry where source_id=?",String.class,paymentId)).isEqualTo("CANCELLED");
     }
 
+    @Test @DisplayName("MGT-TUITION-POLICY creates, saves, publishes, and replays an isolated policy revision")
+    void tuitionPolicyDraftAndPublicationAreAtomicAndIdempotent() {
+        var policies=new JdbcTuitionPolicyRepository(JdbcClient.create(dataSource));
+        var service=new com.ramiart.admin.tuition.application.TuitionPolicyService(policies,
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+        var metadata=new com.ramiart.admin.tuition.application.TuitionPolicyService.Metadata("policy-it","127.0.0.1","test");
+        int year=java.time.Year.now().getValue()+1;
+        UUID createKey=UUID.randomUUID();
+        var draft=service.create(year,actorId,createKey,metadata);
+        assertThat(service.create(year,actorId,createKey,metadata).id()).isEqualTo(draft.id());
+        var items=java.util.stream.IntStream.rangeClosed(1,7).mapToObj(count->new com.ramiart.admin.tuition.application.TuitionPolicyModels.Item(UUID.randomUUID(),count,count*10000L)).toList();
+        var saved=service.save(year,draft.id(),new com.ramiart.admin.tuition.application.TuitionPolicyModels.Write(draft.version(),25,items),actorId,UUID.randomUUID(),metadata);
+        assertThat(saved.version()).isEqualTo(1);
+        assertThat(saved.validation().publishable()).isTrue();
+        UUID publishKey=UUID.randomUUID();
+        var published=service.publish(year,draft.id(),saved.version(),actorId,publishKey,metadata);
+        assertThat(published.status()).isEqualTo("PUBLISHED");
+        assertThat(service.publish(year,draft.id(),saved.version(),actorId,publishKey,metadata).id()).isEqualTo(draft.id());
+        assertThat(jdbc.queryForObject("select count(*) from tuition_policy_item where tuition_policy_id=?",Integer.class,draft.id())).isEqualTo(7);
+    }
+
     @Test @DisplayName("MGT-TUITION-ADJUSTMENT adjustment, refund, and cancellations reconcile immutable history")
     void adjustmentAndRefundReconcileBillingAndFinancialLedger() {
         var adjustmentRepository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource));
