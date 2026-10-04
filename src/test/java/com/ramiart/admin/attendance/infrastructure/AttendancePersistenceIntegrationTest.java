@@ -96,7 +96,9 @@ class AttendancePersistenceIntegrationTest {
         assertThat(saved.sessionVersion()).isEqualTo(1);
         assertThat(saved.attendance().status()).isEqualTo("PRESENT");
         UUID closeKey = UUID.randomUUID();
-        var closed = attendanceService.close(sessionId, new CloseWrite(1), closeAuth, closeKey, metadata);
+        var closeResult = attendanceService.close(sessionId, new CloseWrite(1), closeAuth, closeKey, metadata);
+        assertThat(closeResult.created()).isTrue();
+        var closed = closeResult.session();
         assertThat(closed.status()).isEqualTo("CLOSED");
         assertThat(closed.summary().presentCount()).isOne();
         assertThat(jdbc.queryForObject("select count(*) from audit_log where action in ('ATTENDANCE_RESULT_SAVED','ATTENDANCE_SESSION_CLOSED')", Integer.class)).isEqualTo(2);
@@ -105,7 +107,8 @@ class AttendancePersistenceIntegrationTest {
                 .isInstanceOf(AttendanceException.class)
                 .extracting("code").isEqualTo("ATTENDANCE_SESSION_CLOSED");
         var replay = attendanceService.close(sessionId, new CloseWrite(1), closeAuth, closeKey, metadata);
-        assertThat(replay.status()).isEqualTo("CLOSED");
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.session().status()).isEqualTo("CLOSED");
         assertThat(jdbc.queryForObject("select count(*) from audit_log where action='ATTENDANCE_SESSION_CLOSED'", Integer.class)).isOne();
 
         UUID makeupStudentId = jdbc.queryForObject("select student_id from attendance_session_student where attendance_session_id=?", UUID.class, otherSessionId);
@@ -113,11 +116,14 @@ class AttendancePersistenceIntegrationTest {
                 new AttendanceWrite("ABSENT", null, "보강 처리 통합 검증", true, null, 0), writeAuth, metadata);
         assertThat(makeupSaved.sessionVersion()).isEqualTo(1);
         UUID makeupCloseKey = UUID.randomUUID();
-        var makeupClosure = attendanceService.close(otherSessionId, new CloseWrite(1), closeAuth, makeupCloseKey, metadata);
+        var makeupResult = attendanceService.close(otherSessionId, new CloseWrite(1), closeAuth, makeupCloseKey, metadata);
+        assertThat(makeupResult.created()).isTrue();
+        var makeupClosure = makeupResult.session();
         assertThat(makeupClosure.createdMakeupCount()).isOne();
         assertThat(makeupClosure.makeupCaseIds()).hasSize(1);
         var makeupReplay = attendanceService.close(otherSessionId, new CloseWrite(1), closeAuth, makeupCloseKey, metadata);
-        assertThat(makeupReplay.makeupCaseIds()).containsExactlyElementsOf(makeupClosure.makeupCaseIds());
+        assertThat(makeupReplay.created()).isFalse();
+        assertThat(makeupReplay.session().makeupCaseIds()).containsExactlyElementsOf(makeupClosure.makeupCaseIds());
         assertThatThrownBy(() -> attendanceService.close(otherSessionId, new CloseWrite(0), closeAuth, makeupCloseKey, metadata))
                 .isInstanceOf(AttendanceException.class)
                 .extracting("code").isEqualTo("IDEMPOTENCY_KEY_REUSED");

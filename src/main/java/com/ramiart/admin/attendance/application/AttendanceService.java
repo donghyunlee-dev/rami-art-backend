@@ -113,7 +113,7 @@ public class AttendanceService {
     }
 
     @Transactional
-    public ClosedSession close(UUID sessionId, CloseWrite command, Authentication authentication, UUID key, RequestMetadata metadata) {
+    public CloseResult close(UUID sessionId, CloseWrite command, Authentication authentication, UUID key, RequestMetadata metadata) {
         UUID actorId = actor(authentication, "ATTENDANCE_CLOSE");
         if (command == null || command.version() < 0 || key == null) throw new AttendanceException("VALIDATION_ERROR");
         String scope = actorId + ":POST:/admin/attendance-sessions/{sessionId}/closures";
@@ -122,14 +122,14 @@ public class AttendanceService {
             if (!repository.idempotencyHash(scope, key).filter(requestHash::equals).isPresent())
                 throw new AttendanceException("IDEMPOTENCY_KEY_REUSED");
             SessionState existing = repository.lockSession(sessionId).orElseThrow(() -> new AttendanceException("ATTENDANCE_SESSION_NOT_FOUND"));
-            if ("CLOSED".equals(existing.status())) return closedSnapshot(sessionId);
+            if ("CLOSED".equals(existing.status())) return new CloseResult(closedSnapshot(sessionId), false);
             throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
         }
         SessionState session = repository.lockSession(sessionId).orElseThrow(() -> new AttendanceException("ATTENDANCE_SESSION_NOT_FOUND"));
         if ("CANCELLED".equals(session.status())) throw new AttendanceException("ATTENDANCE_SESSION_CANCELLED");
         if ("CLOSED".equals(session.status())) {
             repository.completeIdempotency(scope, key, sessionId, 200);
-            return closedSnapshot(sessionId);
+            return new CloseResult(closedSnapshot(sessionId), false);
         }
         if (session.version() != command.version()) throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
         List<TargetState> targets = repository.findTargets(sessionId);
@@ -144,8 +144,8 @@ public class AttendanceService {
         event(actorId, metadata, "ATTENDANCE_SESSION_CLOSED", sessionId, Map.of("targetCount", summary.totalCount(), "createdMakeupCount", makeups.size()));
         repository.completeIdempotency(scope, key, sessionId, 201);
         ClosedSession closed = closedSnapshot(sessionId);
-        return new ClosedSession(closed.sessionId(), closed.status(), closed.version(), closed.summary(), closed.closedBy(),
-                closed.closedByName(), closed.closedAt(), makeups.size(), makeups.stream().map(AttendanceRepository.MakeupValue::id).toList());
+        return new CloseResult(new ClosedSession(closed.sessionId(), closed.status(), closed.version(), closed.summary(), closed.closedBy(),
+                closed.closedByName(), closed.closedAt(), makeups.size(), makeups.stream().map(AttendanceRepository.MakeupValue::id).toList()), true);
     }
 
     private ClosedSession closedSnapshot(UUID sessionId) {

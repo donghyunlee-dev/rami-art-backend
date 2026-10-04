@@ -21,4 +21,5 @@ public final class AttendanceModels {
     public record ClosedSession(UUID sessionId, String status, long version, Summary summary,
                                 UUID closedBy, String closedByName, OffsetDateTime closedAt,
                                 int createdMakeupCount, List<UUID> makeupCaseIds) {}
+    public record CloseResult(ClosedSession session, boolean created) {}
 }

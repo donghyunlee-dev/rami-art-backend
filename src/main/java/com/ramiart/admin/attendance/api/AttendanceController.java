@@ -38,10 +38,10 @@ public final class AttendanceController {
     @PostMapping("/{sessionId}/closures")
     ResponseEntity<ApiEnvelope<ClosedSession>> close(@PathVariable UUID sessionId, @RequestHeader("Idempotency-Key") UUID key,
             @RequestBody CloseWrite body, Authentication authentication, HttpServletRequest request) {
-        ClosedSession closed = service.close(sessionId, body, authentication, key, metadata(request));
-        int status = body != null && closed.version() == body.version() + 1 ? 201 : 200;
+        CloseResult result = service.close(sessionId, body, authentication, key, metadata(request));
+        int status = result.created() ? 201 : 200;
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
-                .body(ApiEnvelope.success(closed, RequestIdFilter.get(request)));
+                .body(ApiEnvelope.success(result.session(), RequestIdFilter.get(request)));
     }
     private static RequestMetadata metadata(HttpServletRequest request) {
         return new RequestMetadata(RequestIdFilter.get(request), request.getRemoteAddr(), request.getHeader("User-Agent"));
