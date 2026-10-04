@@ -4,7 +4,7 @@
 >
 > 작성일 `2026-03-12`
 >
-> 이 문서는 현재 백엔드 코드에 실제 구현된 API만 기준으로 유지한다. Blog, Contact, Settings의 개발 명세는 [`PHASE5-API-SPEC.md`](./PHASE5-API-SPEC.md), 설계 정합화 결정은 [`PHASE5-DESIGN.md`](../plan/PHASE5-DESIGN.md)에서 관리하며, 구현 전까지 이 문서의 구현 API 범위에는 포함하지 않는다.
+> 이 문서는 현재 백엔드 코드에 실제 구현된 API만 기준으로 유지한다. Phase 5 Blog, Contact, Settings API의 별도 경로·인증 계약과 설계 정합화 결정은 각각 [`PHASE5-API-SPEC.md`](./PHASE5-API-SPEC.md), [`PHASE5-DESIGN.md`](../plan/PHASE5-DESIGN.md)에서 관리한다.
 
 ## API 공통 규격
 
@@ -66,9 +66,9 @@
 | Auth API | 구현 완료 |
 | Classes API | 구현 완료 |
 | Gallery API | 구현 완료 |
-| Blog API | 계약 확정·미구현 |
-| Contact API | 계약 확정·미구현 |
-| Settings API | 계약 확정·미구현 |
+| Blog API | Phase 5 코드 구현·격리 DB 검증 완료; 운영 배포 확인 대기 |
+| Contact API | Phase 5 코드 구현·격리 DB 검증 완료; 운영 배포 확인 대기 |
+| Settings API | Phase 5 코드 구현·격리 DB 검증 완료; 운영 배포 확인 대기 |
 
 ## 인증 API
 

@@ -199,6 +199,7 @@ public class AuthSessionService {
         routes.put("CONTENT_PROGRAM_READ", "/admin/content/class-programs");
         routes.put("GALLERY_READ", "/admin/content/gallery");
         routes.put("BLOG_READ", "/admin/content/blog");
+        routes.put("SITE_BRAND_READ", "/admin/settings/brand");
         routes.put("INQUIRY_READ", "/admin/inquiries");
         routes.put("ADMIN_ACCOUNT_READ", "/admin/settings/admin-users");
         routes.put("SECURITY_POLICY_READ", "/admin/settings/security-policy");

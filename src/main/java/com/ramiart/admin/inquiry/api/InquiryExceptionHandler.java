@@ -5,6 +5,8 @@ import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.inquiry.application.InquiryException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(assignableTypes={PublicInquiryController.class,AdminInquiryController.class})
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public final class InquiryExceptionHandler {
     private static final Logger LOGGER=LoggerFactory.getLogger(InquiryExceptionHandler.class);
     @ExceptionHandler(InquiryException.class)

@@ -31,7 +31,7 @@ public class JdbcInquiryRepository implements InquiryRepository {
     }
 
     @Override public List<CourseRecord> findCourseOptions() {
-        return jdbc.sql("select id,name,active from course order by display_order,name,id")
+        return jdbc.sql("select id,name,active from course where active order by display_order,name,id")
                 .query((rs,n) -> new CourseRecord(rs.getObject("id",UUID.class),rs.getString("name"),rs.getBoolean("active"))).list();
     }
 

@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
-@Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+@Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE + 10)
 public class AdminGlobalExceptionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AdminGlobalExceptionHandler.class);

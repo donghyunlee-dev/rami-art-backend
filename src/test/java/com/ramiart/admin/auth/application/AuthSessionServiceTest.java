@@ -107,6 +107,20 @@ class AuthSessionServiceTest {
     }
 
     @Test
+    void routesSiteBrandOnlyAdministratorsToTheBrandSettingsScreen() {
+        AdminAccount account = account(false);
+        StoredSession stored = new StoredSession(
+                SESSION_ID, account, ROLE_ID, "CONTENT", policy,
+                NOW.plus(Duration.ofHours(12)), NOW.plus(Duration.ofHours(1)), null);
+        when(repository.findSession(any(), eq(false))).thenReturn(Optional.of(stored));
+        when(repository.findPermissions(ROLE_ID)).thenReturn(List.of("SITE_BRAND_READ"));
+
+        AuthSessionService.CurrentContext result = service.current("raw-session-token");
+
+        assertThat(result.firstAllowedPath()).isEqualTo("/admin/settings/brand");
+    }
+
+    @Test
     void forcesPasswordChangeRouteWhileKeepingRolePermissions() {
         AdminAccount account = account(true);
         StoredSession stored = new StoredSession(

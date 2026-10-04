@@ -90,6 +90,17 @@ class InquiryPersistenceIntegrationTest {
                 .isInstanceOf(InquiryException.class).extracting("code").isEqualTo("INQUIRY_QUERY_INVALID");
     }
 
+    @Test void courseOptionsContainOnlyActiveCourses(){
+        UUID admin=jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);
+        UUID active=UUID.randomUUID(),inactive=UUID.randomUUID();
+        jdbc.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,?,?,?,?,?)",
+                active,"ACTIVE_INQUIRY","활성 과정",100,true,admin,admin);
+        jdbc.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,?,?,?,?,?)",
+                inactive,"INACTIVE_INQUIRY","비활성 과정",101,false,admin,admin);
+
+        assertThat(service.courseOptions()).extracting("courseId").containsExactly(active);
+    }
+
     @Test void readAndActivitiesAreVersionedIdempotentAndAuditedWithoutNotes(){UUID actor=jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);service.submit(submission("김보호","010-1234-5678",""),UUID.randomUUID(),meta("submit"));UUID id=jdbc.queryForObject("select id from inquiry",UUID.class);
         UUID readKey=UUID.randomUUID();var receipt=service.markRead(id,new ReadReceiptWrite(0),actor,readKey,meta("read"));assertThat(receipt.read()).isTrue();assertThat(receipt.version()).isOne();
         assertThat(service.markRead(id,new ReadReceiptWrite(0),actor,readKey,meta("read-retry"))).isEqualTo(receipt);

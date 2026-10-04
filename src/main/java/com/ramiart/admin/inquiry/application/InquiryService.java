@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -59,7 +60,7 @@ public class InquiryService {
         return new Accepted(true);
     }
 
-    @Transactional(readOnly=true)
+    @Transactional(readOnly=true, isolation=Isolation.REPEATABLE_READ)
     public InquiryPage list(String keyword,List<UUID> courseIds,List<String> statuses,LocalDate from,LocalDate to,
             String readState,int page,int size) {
         LocalDate today=LocalDate.now(clock.withZone(studioZone));
@@ -84,7 +85,7 @@ public class InquiryService {
                 .map(course -> new CourseOption(course.id(),course.name(),course.active())).toList();
     }
 
-    @Transactional(readOnly=true)
+    @Transactional(readOnly=true, isolation=Isolation.REPEATABLE_READ)
     public InquiryDetail detail(UUID id) { return toDetail(require(id),repository.findActivities(id)); }
 
     @Transactional

@@ -2,7 +2,7 @@
 
 > 상태: 구현 계약 확정본
 >
-> 구현 상태: 미구현
+> 구현 상태: 구현 및 검증 진행 중 — 완료 상태는 `docs/result/`의 검증 기록을 따른다.
 >
 > 기준: 현재 백엔드 보안 필터·응답 envelope·Supabase migration과 웹 관리자 설계
 
@@ -21,7 +21,11 @@ Phase 5는 기존 시스템을 바꾸지 않고 관리자 전용 경계를 사�
 - 공개 문의 `POST /api/public/inquiries`는 인증 없이 허용되며 rate limit·honeypot·동의 검증을 적용한다.
 - Phase 5 엔드포인트에는 Bearer JWT를 요구하지 않는다. `/api/v1/**`와 경로를 혼용하지 않는다.
 
-### 배포별 쿠키·CORS 결정
+### 현재 운영 연결 경계
+
+브라우저는 same-origin `/api/backend/**` Next.js 프록시를 사용하며, 프록시가 Render 백엔드에 서버 간 요청을 전달한다. 따라서 브라우저가 Render API를 직접 호출하는 교차 출처 쿠키/CORS 시나리오는 현재 Phase 5 연동 기준이 아니다. 기존 세션 쿠키·Origin 검증은 현재 백엔드 구현 및 [`MONOREPO-DEPLOYMENT.md`](../../../docs/backend/MONOREPO-DEPLOYMENT.md)를 기준으로 유지하며, 외부 브라우저 도메인의 직접 호출은 별도 보안 계약과 배포 검증 없이 추가하지 않는다.
+
+### 배포별 쿠키·CORS 결정 (직접 호출을 별도 도입할 경우에만 적용)
 
 | 환경 | 웹 Origin | API Origin | 사이트 관계 | Cookie SameSite | Fetch credentials |
 |---|---|---|---|---|---|
@@ -29,7 +33,7 @@ Phase 5는 기존 시스템을 바꾸지 않고 관리자 전용 경계를 사�
 | 현재 운영 | `https://ramiartstudio.com` 또는 `https://rami-art-studio.vercel.app` | `https://rami-art-backend.onrender.com` | cross-site | `None` + `Secure` | `include` |
 | 권장 향후 구성 | `https://ramiartstudio.com` | `https://api.ramiartstudio.com` | same-site | `Strict` 가능 | `include` |
 
-현재 Render 도메인을 계속 사용하는 운영 환경에서는 `SameSite=Strict`를 사용하지 않는다. `Strict` 또는 `Lax` 쿠키는 `credentials: include`를 사용해도 cross-site 요청에 포함되지 않는다. [MDN Fetch credentials 안내](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch#including_credentials) 기준으로, 운영 쿠키는 `SameSite=None; Secure`로 발급해야 한다. `__Host-` 쿠키의 `Domain` 속성은 생략하고 `Path=/`는 유지한다.
+아래 표와 CORS 규칙은 향후 브라우저가 Render 도메인을 직접 호출하도록 명시적으로 변경할 때에만 적용한다. 현재 프록시 기반 운영에서 이 설정을 도입하거나 보안 경계를 변경하지 않는다.
 
 관리자 CORS는 현재 `/api/v1/**`용 `SecurityConfig`의 `allowCredentials=false` 설정과 분리한다.
 
@@ -189,7 +193,7 @@ Query: `keyword`(2~50자), `categories[]`(`CLASS_STORY|STUDIO_NEWS|ARTWORK_STORY
 
 `GET /api/public/blog-posts`
 
-인증 없음. 현재 `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 구현 시 이 GET 경로를 `permitAll` allowlist에 명시적으로 추가한다. Query `category`, `keyword`, `page`, `size`; `status=PUBLISHED AND visible=true`이며 `deleted_at` 대신 현재 테이블의 `status`와 publication immutable 규칙을 사용한다. 응답 item은 `postId`, `title`, `summary`, `content`, `category`, `media`, `publishedAt`만 공개한다. 웹 Origin에서 직접 호출할 경우 공개 CORS 정책을 적용하고 credentials는 사용하지 않는다.
+인증 없음. `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 이 경로를 `permitAll` allowlist에 명시한다. Query `category`, `keyword`, `page`, `size`; `status=PUBLISHED AND visible=true`이며 `deleted_at` 대신 현재 테이블의 `status`와 publication immutable 규칙을 사용한다. 응답 item은 `postId`, `title`, `summary`, `content`, `category`, `media`, `publishedAt`만 공개한다. 웹사이트는 현재 same-origin Next.js 프록시를 통해 호출한다.
 
 ## 문의
 
@@ -382,7 +386,7 @@ POST /api/admin/site-brand/preview
 
 `GET /api/public/site-brand`
 
-공개 웹사이트가 동적으로 브랜드 설정을 읽을 수 있도록 제공한다. 인증과 Origin 검증은 없고, `status=PUBLISHED`인 최신 revision만 반환한다. 현재 `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 구현 시 이 GET 경로를 `permitAll` allowlist에 명시적으로 추가하고, 공개 CORS 정책(`allowCredentials=false`)을 함께 추가한다.
+공개 웹사이트가 동적으로 브랜드 설정을 읽을 수 있도록 제공한다. 인증과 Origin 검증은 없고, `status=PUBLISHED`인 최신 revision만 반환한다. `SecurityConfiguration`의 `anyRequest().denyAll()`을 유지하므로 이 GET 경로를 `permitAll` allowlist에 명시한다. 웹사이트는 현재 same-origin Next.js 프록시를 통해 호출한다.
 
 공개 응답은 내부 ID·version·작성자·초안을 제외한다.
 
