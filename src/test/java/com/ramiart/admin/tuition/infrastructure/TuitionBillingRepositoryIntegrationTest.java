@@ -175,6 +175,41 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select status from financial_entry where source_id=?",String.class,paymentId)).isEqualTo("CANCELLED");
     }
 
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT adjustment, refund, and cancellations reconcile immutable history")
+    void adjustmentAndRefundReconcileBillingAndFinancialLedger() {
+        var adjustmentRepository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource));
+        var service=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(adjustmentRepository,
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_ADJUSTMENT_READ","TUITION_ADJUSTMENT_WRITE","TUITION_REFUND_WRITE");
+        var metadata=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("adjustment-it","127.0.0.1","integration-test");
+        var transactions=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        long version=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        var adjustment=transactions.execute(status->service.adjust(billingId,
+                new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("CORRECTION",-130000,"통합시험 조정",version),
+                UUID.randomUUID(),metadata,authentication));
+        UUID adjustmentId=(UUID)((Map<?,?>)((List<?>)adjustment.get("adjustments")).getFirst()).get("adjustmentId");
+        assertThat(((Map<?,?>)adjustment.get("billing")).get("refundableAmount")).isEqualTo(10000L);
+        long refundBillingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        var refunded=transactions.execute(status->service.refund(billingId,
+                new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(1000,LocalDate.now(),"CASH",null,null,"통합시험 환불",refundBillingVersion),
+                UUID.randomUUID(),metadata,authentication));
+        UUID refundId=(UUID)((Map<?,?>)((List<?>)refunded.get("refunds")).getFirst()).get("refundId");
+        UUID entryId=jdbc.queryForObject("select financial_entry_id from tuition_refund where id=?",UUID.class,refundId);
+        assertThat(jdbc.queryForObject("select source_type from financial_entry where id=?",String.class,entryId)).isEqualTo("TUITION_REFUND");
+        long versionAfterRefund=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        transactions.executeWithoutResult(status->service.cancelRefund(refundId,
+                new com.ramiart.admin.tuition.application.TuitionAdjustmentService.CancelRequest("통합시험 환불 취소",0,versionAfterRefund),
+                UUID.randomUUID(),metadata,authentication));
+        long versionBeforeAdjustmentCancel=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        transactions.executeWithoutResult(status->service.cancelAdjustment(adjustmentId,
+                new com.ramiart.admin.tuition.application.TuitionAdjustmentService.CancelRequest("통합시험 조정 취소",0,versionBeforeAdjustmentCancel),
+                UUID.randomUUID(),metadata,authentication));
+        assertThat(jdbc.queryForObject("select adjustment_amount from tuition_billing where id=?",Long.class,billingId)).isEqualTo(-10000L);
+        assertThat(jdbc.queryForObject("select refunded_amount from tuition_billing where id=?",Long.class,billingId)).isZero();
+        assertThat(jdbc.queryForObject("select status from financial_entry where id=?",String.class,entryId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("select status from billing_adjustment where id=?",String.class,adjustmentId)).isEqualTo("CANCELLED");
+    }
+
     @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T005/T009/T010 batch issuance and idempotent replay")
     void selectedBatchIssuesOnceAndPersistsAuditAndReplayResult() {
         var protector=new com.ramiart.admin.tuition.infrastructure.AesGcmTuitionPreviewSnapshotProtector("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
