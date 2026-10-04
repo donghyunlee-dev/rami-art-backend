@@ -81,7 +81,9 @@ public class JdbcInquiryRepository implements InquiryRepository {
                   and i.status = any(cast(:statuses as text[]))
                   and (:course_empty or i.interested_course_id = any(cast(:courses as uuid[])))
                   and (:read_state='ALL' or (:read_state='READ' and i.read_at is not null) or (:read_state='UNREAD' and i.read_at is null))
-                  and (:keyword_hash is null or i.name_hash=:keyword_hash or i.phone_hash=:keyword_hash)
+                  and (cast(:keyword_hash as char(64)) is null
+                    or i.name_hash=cast(:keyword_hash as char(64))
+                    or i.phone_hash=cast(:keyword_hash as char(64)))
                 """;
         var base = jdbc.sql("""
                 select count(*) total, count(*) filter(where i.read_at is null) unread,

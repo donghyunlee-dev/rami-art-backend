@@ -90,6 +90,12 @@ class InquiryPersistenceIntegrationTest {
                 .isInstanceOf(InquiryException.class).extracting("code").isEqualTo("INQUIRY_QUERY_INVALID");
     }
 
+    @Test void listWithoutKeywordWorksWithNullableHashOnPostgres17(){
+        service.submit(submission("조회 대상","010-2345-6789",""),UUID.randomUUID(),meta("submit-null-keyword"));
+        LocalDate from=LocalDate.now().minusDays(1),to=LocalDate.now();
+        assertThat(service.list(null,List.of(),List.of("RECEIVED","CONTACTING"),from,to,"ALL",0,10).totalElements()).isOne();
+    }
+
     @Test void courseOptionsContainOnlyActiveCourses(){
         UUID admin=jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);
         UUID active=UUID.randomUUID(),inactive=UUID.randomUUID();
