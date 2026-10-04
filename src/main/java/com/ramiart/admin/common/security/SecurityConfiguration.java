@@ -120,6 +120,10 @@ public class SecurityConfiguration {
                                 .hasAuthority("SCHEDULE_PUBLISH")
                         .requestMatchers(HttpMethod.GET, "/api/admin/attendance-sessions", "/api/admin/attendance-sessions/**")
                                 .hasAuthority("ATTENDANCE_READ")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/attendance-sessions/*/students/*")
+                                .hasAuthority("ATTENDANCE_WRITE")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/attendance-sessions/*/closures")
+                                .hasAuthority("ATTENDANCE_CLOSE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/students/*/schedule-assignments",
                                 "/api/admin/students/*/schedule-assignment-candidates")
                                 .hasAuthority("STUDENT_READ")

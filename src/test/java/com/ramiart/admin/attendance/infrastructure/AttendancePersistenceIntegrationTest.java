@@ -1,0 +1,175 @@
+package com.ramiart.admin.attendance.infrastructure;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.ramiart.admin.attendance.application.AttendanceService;
+import com.ramiart.admin.attendance.application.AttendanceService.AttendanceException;
+import com.ramiart.admin.attendance.application.AttendanceModels.AttendanceWrite;
+import com.ramiart.admin.attendance.application.AttendanceModels.CloseWrite;
+import com.ramiart.admin.attendance.application.AttendanceService.RequestMetadata;
+import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
+import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.UUID;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class AttendancePersistenceIntegrationTest {
+    private static final EmbeddedPostgres POSTGRES = startPostgres();
+
+    DataSource dataSource = POSTGRES.getPostgresDatabase();
+    AttendanceService attendanceService;
+    JdbcTemplate jdbc;
+    UUID actorId;
+
+    @BeforeAll
+    void resetDatabase() throws SQLException, IOException {
+        jdbc = new JdbcTemplate(dataSource);
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            createRoleIfMissing(statement, "anon");
+            createRoleIfMissing(statement, "authenticated");
+            statement.execute("drop schema if exists public cascade");
+            statement.execute("drop schema if exists extensions cascade");
+            statement.execute("create schema public");
+            statement.execute("create schema extensions");
+        }
+        Path root = projectRoot();
+        try (var migrations = Files.list(root.resolve("supabase/migrations"))) {
+            for (Path migration : migrations.filter(path -> path.toString().endsWith(".sql")).sorted().toList()) {
+                PostgresScriptRunner.execute(dataSource, migration);
+            }
+        }
+        PostgresScriptRunner.execute(dataSource, root.resolve("supabase/seed.sql"));
+        actorId = jdbc.queryForObject("select id from admin_user order by email limit 1", UUID.class);
+        JdbcClient client = JdbcClient.create(dataSource);
+        attendanceService = new AttendanceService(new JdbcAttendanceRepository(client), new JdbcAuditRecorder(client, new ObjectMapper()));
+    }
+
+    @AfterAll
+    void stopPostgres() throws IOException { POSTGRES.close(); }
+
+    @Test
+    void attendanceReadRequiresScopeAndReturnsOnlyTheRequestedDatabaseSession() {
+        UUID sessionId = insertAttendanceFixture("요청한 반");
+        UUID otherSessionId = insertAttendanceFixture("다른 반");
+        var auth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_READ");
+
+        var result = attendanceService.findById(sessionId, auth);
+
+        assertThat(result.id()).isEqualTo(sessionId);
+        assertThat(result.className()).isEqualTo("요청한 반");
+        assertThat(result.students()).hasSize(1);
+        assertThat(result.students().getFirst().studentName()).isEqualTo("통합 검증 원생");
+        assertThat(result.id()).isNotEqualTo(otherSessionId);
+        var unauthorized = new TestingAuthenticationToken(actorId.toString(), "", "STUDENT_READ");
+        assertThatThrownBy(() -> attendanceService.findById(sessionId, unauthorized))
+                .isInstanceOf(AttendanceException.class)
+                .extracting("code").isEqualTo("ATTENDANCE_READ_DENIED");
+        assertThatThrownBy(() -> attendanceService.findById(UUID.randomUUID(), auth))
+                .isInstanceOf(AttendanceException.class)
+                .extracting("code").isEqualTo("ATTENDANCE_SESSION_NOT_FOUND");
+
+        UUID studentId = jdbc.queryForObject("select student_id from attendance_session_student where attendance_session_id=?", UUID.class, sessionId);
+        var metadata = new RequestMetadata("req_attendance_write", "127.0.0.1", "integration-test");
+        var writeAuth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_WRITE");
+        var closeAuth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_CLOSE");
+        var saved = attendanceService.save(sessionId, studentId,
+                new AttendanceWrite("PRESENT", null, null, false, null, 0), writeAuth, metadata);
+        assertThat(saved.sessionVersion()).isEqualTo(1);
+        assertThat(saved.attendance().status()).isEqualTo("PRESENT");
+        UUID closeKey = UUID.randomUUID();
+        var closed = attendanceService.close(sessionId, new CloseWrite(1), closeAuth, closeKey, metadata);
+        assertThat(closed.status()).isEqualTo("CLOSED");
+        assertThat(closed.summary().presentCount()).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where action in ('ATTENDANCE_RESULT_SAVED','ATTENDANCE_SESSION_CLOSED')", Integer.class)).isEqualTo(2);
+        assertThatThrownBy(() -> attendanceService.save(sessionId, studentId,
+                new AttendanceWrite("PRESENT", null, null, false, 0L, 2), writeAuth, metadata))
+                .isInstanceOf(AttendanceException.class)
+                .extracting("code").isEqualTo("ATTENDANCE_SESSION_CLOSED");
+        var replay = attendanceService.close(sessionId, new CloseWrite(1), closeAuth, closeKey, metadata);
+        assertThat(replay.status()).isEqualTo("CLOSED");
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where action='ATTENDANCE_SESSION_CLOSED'", Integer.class)).isOne();
+
+        UUID makeupStudentId = jdbc.queryForObject("select student_id from attendance_session_student where attendance_session_id=?", UUID.class, otherSessionId);
+        var makeupSaved = attendanceService.save(otherSessionId, makeupStudentId,
+                new AttendanceWrite("ABSENT", null, "보강 처리 통합 검증", true, null, 0), writeAuth, metadata);
+        assertThat(makeupSaved.sessionVersion()).isEqualTo(1);
+        UUID makeupCloseKey = UUID.randomUUID();
+        var makeupClosure = attendanceService.close(otherSessionId, new CloseWrite(1), closeAuth, makeupCloseKey, metadata);
+        assertThat(makeupClosure.createdMakeupCount()).isOne();
+        assertThat(makeupClosure.makeupCaseIds()).hasSize(1);
+        var makeupReplay = attendanceService.close(otherSessionId, new CloseWrite(1), closeAuth, makeupCloseKey, metadata);
+        assertThat(makeupReplay.makeupCaseIds()).containsExactlyElementsOf(makeupClosure.makeupCaseIds());
+        assertThatThrownBy(() -> attendanceService.close(otherSessionId, new CloseWrite(0), closeAuth, makeupCloseKey, metadata))
+                .isInstanceOf(AttendanceException.class)
+                .extracting("code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
+        assertThat(jdbc.queryForObject("select count(*) from makeup_case where origin_session_id=?", Integer.class, otherSessionId)).isOne();
+    }
+
+    private UUID insertAttendanceFixture(String className) {
+        UUID courseId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        UUID slotId = UUID.randomUUID();
+        UUID scheduleId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        int fixtureOrder = Math.floorMod(courseId.hashCode(), 100000);
+        jdbc.update("insert into course(id,code,name,display_order,created_by,updated_by) values(?,?,?,?,?,?)",
+                courseId, "TEST_" + courseId.toString().substring(0, 8).toUpperCase(), "검증 과정", fixtureOrder, actorId, actorId);
+        jdbc.update("insert into class_group(id,course_id,code,name,room_code,capacity,makeup_valid_days,starts_on,status,created_by,updated_by) values(?,?,?,?,?,10,30,?,'ACTIVE',?,?)",
+                groupId, courseId, "GROUP_" + groupId.toString().substring(0, 8).toUpperCase(), className,
+                "ROOM_A", today.minusDays(1), actorId, actorId);
+        jdbc.update("insert into schedule_slot(id,class_group_id,created_by) values(?,?,?)", slotId, groupId, actorId);
+        String yearMonth = "2099-" + String.format("%02d", Math.floorMod(groupId.hashCode(), 12) + 1);
+        jdbc.update("insert into monthly_schedule(id,year_month,revision,status,created_by) values(?,?,1,'DRAFT',?)",
+                scheduleId, yearMonth, actorId);
+        jdbc.update("insert into monthly_schedule_item(id,schedule_slot_id,monthly_schedule_id,day_of_week,start_time,end_time,title,room_code) values(?,?,?,1,'10:00','11:00',?,'ROOM_A')",
+                itemId, slotId, scheduleId, className);
+        jdbc.update("insert into student(id,student_name,student_name_search,joined_at,created_by,updated_by) values(?,?,?, ?,?,?)",
+                studentId, "통합 검증 원생", "통합검증원생", today.minusDays(3), actorId, actorId);
+        jdbc.update("insert into attendance_session(id,schedule_item_id,schedule_slot_id,class_group_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count) values(?,?,?,?,?,?,?,?,?,1)",
+                sessionId, itemId, slotId, groupId, today,
+                className, "ROOM_A", today.atTime(LocalTime.of(10, 0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
+                today.atTime(LocalTime.of(11, 0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+        jdbc.update("insert into attendance_session_student(attendance_session_id,student_id,student_name_snapshot,display_order) values(?,?,?,0)",
+                sessionId, studentId, "통합 검증 원생");
+        return sessionId;
+    }
+
+    private static EmbeddedPostgres startPostgres() {
+        try { return EmbeddedPostgres.builder().start(); }
+        catch (IOException exception) { throw new ExceptionInInitializerError(exception); }
+    }
+    private static Path projectRoot() {
+        Path current = Path.of("").toAbsolutePath().normalize();
+        while (current != null && !Files.isDirectory(current.resolve("supabase/migrations"))) current = current.getParent();
+        if (current == null) throw new IllegalStateException("supabase migrations directory not found");
+        return current;
+    }
+    private static void createRoleIfMissing(Statement statement, String role) throws SQLException {
+        try (var rows = statement.executeQuery("select exists(select 1 from pg_roles where rolname='" + role + "')")) {
+            rows.next();
+            if (!rows.getBoolean(1)) statement.execute("create role " + role);
+        }
+    }
+}
