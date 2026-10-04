@@ -68,8 +68,13 @@ public final class AttendanceController {
     }
     @ExceptionHandler(DataAccessException.class)
     ResponseEntity<ApiEnvelope<Void>> persistence(DataAccessException exception,HttpServletRequest request){
-        String code="PUT".equals(request.getMethod())?"ATTENDANCE_SAVE_FAILED":"ATTENDANCE_CLOSE_FAILED";
+        String code = switch (request.getMethod()) {
+            case "PUT" -> "ATTENDANCE_SAVE_FAILED";
+            case "POST" -> "ATTENDANCE_CLOSE_FAILED";
+            default -> "INTERNAL_SERVER_ERROR";
+        };
         LOG.error("Attendance persistence failed: requestId={}, method={}, path={}",RequestIdFilter.get(request),request.getMethod(),request.getRequestURI());
-        return ResponseEntity.internalServerError().cacheControl(CacheControl.noStore()).body(ApiEnvelope.failure(code,"출석 정보를 처리하지 못했습니다.",java.util.List.of(),RequestIdFilter.get(request)));
+        String message = "INTERNAL_SERVER_ERROR".equals(code) ? "요청 처리 중 오류가 발생했습니다." : "출석 정보를 처리하지 못했습니다.";
+        return ResponseEntity.internalServerError().cacheControl(CacheControl.noStore()).body(ApiEnvelope.failure(code,message,java.util.List.of(),RequestIdFilter.get(request)));
     }
 }

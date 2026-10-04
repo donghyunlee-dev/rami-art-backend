@@ -179,7 +179,15 @@ class AttendancePersistenceIntegrationTest {
                 groupId, courseId, "GROUP_" + groupId.toString().substring(0, 8).toUpperCase(), className,
                 "ROOM_A", today.minusDays(1), actorId, actorId);
         jdbc.update("insert into schedule_slot(id,class_group_id,created_by) values(?,?,?)", slotId, groupId, actorId);
-        String yearMonth = "2099-" + String.format("%02d", Math.floorMod(groupId.hashCode(), 12) + 1);
+        String yearMonth = jdbc.queryForObject("""
+                select '2099-' || lpad(month::text, 2, '0')
+                from generate_series(1, 12) as month
+                where not exists (
+                    select 1 from monthly_schedule where year_month = '2099-' || lpad(month::text, 2, '0') and status = 'DRAFT'
+                )
+                order by month
+                limit 1
+                """, String.class);
         jdbc.update("insert into monthly_schedule(id,year_month,revision,status,created_by) values(?,?,1,'DRAFT',?)",
                 scheduleId, yearMonth, actorId);
         jdbc.update("insert into monthly_schedule_item(id,schedule_slot_id,monthly_schedule_id,day_of_week,start_time,end_time,title,room_code) values(?,?,?,1,'10:00','11:00',?,'ROOM_A')",
