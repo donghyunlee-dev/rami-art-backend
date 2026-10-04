@@ -210,6 +210,63 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select status from billing_adjustment where id=?",String.class,adjustmentId)).isEqualTo("CANCELLED");
     }
 
+    @Test @DisplayName("MGT-TUITION-RECEIPT issue, reissue, hash validation, and payment cancellation preserve versions")
+    void receiptVersionsUsePaymentSnapshotsAndVoidOnPaymentCancellation() {
+        var objectStorage=new java.util.concurrent.ConcurrentHashMap<String,byte[]>();
+        var storage=new com.ramiart.admin.tuition.application.TuitionReceiptStorage(){
+            public void upload(String key,byte[] pdf){objectStorage.put(key,pdf.clone());}
+            public byte[] download(String key){return objectStorage.get(key).clone();}
+            public String signedUrl(String key,int seconds){return "https://storage.test/"+key+"?expiresIn="+seconds;}
+            public void delete(String key){objectStorage.remove(key);}
+        };
+        var receiptMapper=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        var receipts=new JdbcTuitionReceiptRepository(JdbcClient.create(dataSource),receiptMapper);
+        var audit=new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper());
+        var service=new com.ramiart.admin.tuition.application.TuitionReceiptService(receipts,storage,
+                new com.ramiart.admin.tuition.infrastructure.TuitionReceiptPdfGenerator(),audit,java.time.Clock.systemUTC(),
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        var paymentRepository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionPaymentRepository(JdbcClient.create(dataSource));
+        var paymentService=new TuitionPaymentService(paymentRepository,audit,java.time.Clock.systemUTC());
+        var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_WRITE","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE");
+        var paymentTx=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        var metadata=new com.ramiart.admin.tuition.application.TuitionReceiptService.Metadata("receipt-it","127.0.0.1","integration-test");
+        long billingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        var created=paymentTx.execute(status->paymentService.create(billingId,new TuitionPaymentService.CreateRequest(LocalDate.now(),1000,"CASH",null,billingVersion),
+                UUID.randomUUID(),new TuitionPaymentService.Metadata("receipt-payment-it","127.0.0.1","integration-test"),auth));
+        UUID paymentId=(UUID)((Map<?,?>)created.get("payment")).get("paymentId");
+        var issueKey=UUID.randomUUID();
+        var issueRequest=new com.ramiart.admin.tuition.application.TuitionReceiptService.IssueRequest(0L,billingVersion+1);
+        var first=service.issue(paymentId,issueRequest,issueKey,metadata,
+                new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE"));
+        assertThat(first).containsEntry("receiptNumber",first.get("receiptNumber")).containsEntry("currentVersion",1);
+        var replay=service.issue(paymentId,issueRequest,issueKey,metadata,new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE"));
+        assertThat(replay.get("receiptId")).isEqualTo(first.get("receiptId"));
+        assertThat(jdbc.queryForObject("select count(*) from tuition_receipt where payment_id=?",Integer.class,paymentId)).isOne();
+        UUID receiptId=(UUID)first.get("receiptId");
+        Map<?,?> firstVersion=(Map<?,?>)((List<?>)first.get("versions")).getFirst();
+        assertThat(firstVersion.get("status")).isEqualTo("READY");
+        assertThat(firstVersion.get("downloadable")).isEqualTo(true);
+        String firstKey=jdbc.queryForObject("select storage_key from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId);
+        assertThat(objectStorage.get(firstKey)).startsWith("%PDF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        byte[] originalPdf=objectStorage.get(firstKey).clone();objectStorage.put(firstKey,new byte[]{1,2,3});
+        assertThatThrownBy(()->service.downloadUrl(receiptId,1,metadata,new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ")))
+                .isInstanceOf(JdbcTuitionReceiptRepository.TuitionReceiptException.class).extracting("code").isEqualTo("RECEIPT_FILE_INTEGRITY_FAILED");
+        objectStorage.put(firstKey,originalPdf);
+        var url=service.downloadUrl(receiptId,1,metadata,new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ"));
+        assertThat(url.get("url")).isEqualTo("https://storage.test/"+firstKey+"?expiresIn=60");
+        long reissueVersion=((Number)first.get("currentVersion")).longValue();
+        var second=service.reissue(receiptId,new com.ramiart.admin.tuition.application.TuitionReceiptService.ReissueRequest((int)reissueVersion,"통합시험 재발행"),
+                UUID.randomUUID(),metadata,new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE"));
+        assertThat(second.get("currentVersion")).isEqualTo(2);
+        assertThat((List<?>)second.get("versions")).hasSize(2);
+        assertThat(jdbc.queryForObject("select snapshot->>'maskedStudentName' from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId))
+                .isEqualTo("통*******");
+        long currentBillingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,billingId);
+        paymentTx.executeWithoutResult(status->paymentService.cancel(paymentId,new TuitionPaymentService.CancelRequest("통합시험 납입 취소",0,currentBillingVersion),
+                UUID.randomUUID(),new TuitionPaymentService.Metadata("receipt-payment-cancel-it","127.0.0.1","integration-test"),auth));
+        assertThat(jdbc.queryForObject("select status from tuition_receipt where id=?",String.class,receiptId)).isEqualTo("VOID");
+    }
+
     @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T005/T009/T010 batch issuance and idempotent replay")
     void selectedBatchIssuesOnceAndPersistsAuditAndReplayResult() {
         var protector=new com.ramiart.admin.tuition.infrastructure.AesGcmTuitionPreviewSnapshotProtector("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");

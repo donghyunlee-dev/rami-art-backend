@@ -91,6 +91,7 @@ public class JdbcTuitionPaymentRepository implements TuitionPaymentRepository {
                 .param("actor",actorId).param("reason",reason).param("id",paymentId).update();
         jdbc.sql("update financial_entry set status='CANCELLED',cancelled_by=:actor,cancelled_at=statement_timestamp(),cancel_reason=:reason,version=version+1 where id=:id and status='CONFIRMED'")
                 .param("actor",actorId).param("reason",reason).param("id",entryId).update();
+        jdbc.sql("update tuition_receipt set status='VOID' where payment_id=:payment and status='ACTIVE'").param("payment",paymentId).update();
         jdbc.sql("update tuition_billing set paid_amount=:paid,payment_status=:status,version=version+1 where id=:id")
                 .param("paid",paidAmount).param("status",paymentStatus).param("id",billing.id()).update();
     }
