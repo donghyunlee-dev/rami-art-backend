@@ -196,6 +196,36 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from tuition_policy_item where tuition_policy_id=?",Integer.class,draft.id())).isEqualTo(7);
     }
 
+    @Test @DisplayName("MGT-STUDENT-TUITION-ASSIGN exposes published candidates and creates an idempotent assignment")
+    void studentTuitionAssignmentUsesActiveSchedulesAndPublishedPolicies() {
+        var assignments=new JdbcStudentTuitionAssignmentRepository(JdbcClient.create(dataSource));
+        var service=new com.ramiart.admin.tuition.application.StudentTuitionAssignmentService(assignments,
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+        var auth=new org.springframework.security.authentication.TestingAuthenticationToken(actorId.toString(),"","STUDENT_READ","TUITION_POLICY_READ","STUDENT_TUITION_WRITE");
+        var metadata=new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Metadata("student-tuition-it","127.0.0.1","test");
+        int year=java.time.Year.now().getValue()+2;LocalDate start=LocalDate.of(year,1,1);UUID target=UUID.randomUUID();
+        jdbc.update("insert into student(id,student_name,student_name_search,joined_at,status,created_by,updated_by) values(?,?,?,?,'ACTIVE',?,?)",target,"배정 통합 원생","배정통합원생",LocalDate.now().minusYears(8),actorId,actorId);
+        UUID course=UUID.randomUUID(),group=UUID.randomUUID();String suffix=UUID.randomUUID().toString().replace("-","").substring(0,10).toUpperCase();
+        int order=jdbc.queryForObject("select coalesce(max(display_order),-1)+1 from course",Integer.class);
+        jdbc.update("insert into course(id,code,name,display_order,created_by,updated_by) values(?,?,?, ?,?,?)",course,"TU"+suffix,"배정 통합 과정",order,actorId,actorId);
+        jdbc.update("insert into class_group(id,course_id,code,name,room_code,capacity,makeup_valid_days,starts_on,status,created_by,updated_by) values(?,?,?,?,?,10,0,?,'ACTIVE',?,?)",group,course,"GR"+suffix,"배정 통합 반","R1",LocalDate.now().minusYears(3),actorId,actorId);
+        for(int n=0;n<2;n++){UUID slot=UUID.randomUUID();jdbc.update("insert into schedule_slot(id,class_group_id,status,created_by) values(?,?,'ACTIVE',?)",slot,group,actorId);jdbc.update("insert into student_schedule_assignment(id,student_id,schedule_slot_id,effective_from,created_by,updated_by) values(?,?,?,?,?,?)",UUID.randomUUID(),target,slot,start,actorId,actorId);}
+        UUID policy=UUID.randomUUID(),item=UUID.randomUUID(),wrongCountItem=UUID.randomUUID();jdbc.update("insert into tuition_policy(id,year,revision,status,default_due_day,created_by) values(?,?,1,'DRAFT',25,?)",policy,year,actorId);jdbc.update("insert into tuition_policy_item(id,tuition_policy_id,lesson_count_per_week,monthly_amount) values(?,?,2,220000)",item,policy);jdbc.update("insert into tuition_policy_item(id,tuition_policy_id,lesson_count_per_week,monthly_amount) values(?,?,3,300000)",wrongCountItem,policy);jdbc.update("update tuition_policy set status='PUBLISHED',published_by=?,published_at=statement_timestamp() where id=?",actorId,policy);
+        var candidate=service.candidates(target,start,auth);assertThat(candidate.lessonCountPerWeek()).isEqualTo(2);assertThat(candidate.candidates()).hasSize(1);
+        UUID key=UUID.randomUUID();var write=new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Write(item,start,null,null,null);var created=service.create(target,write,actorId,key,metadata);
+        assertThat(created.status()).isEqualTo(201);assertThat(created.data()).containsEntry("effectiveAmount",220000L).containsEntry("status","SCHEDULED");
+        var replay=service.create(target,write,actorId,key,metadata);assertThat(replay.status()).isEqualTo(200);assertThat(replay.data().get("assignmentId")).isEqualTo(created.data().get("assignmentId"));
+        assertThatThrownBy(()->service.create(target,write,actorId,UUID.randomUUID(),metadata))
+                .isInstanceOf(com.ramiart.admin.tuition.application.StudentTuitionAssignmentException.class).extracting("code").isEqualTo("STUDENT_TUITION_PERIOD_CONFLICT");
+        assertThatThrownBy(()->service.create(target,new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Write(wrongCountItem,start,null,null,null),actorId,UUID.randomUUID(),metadata))
+                .isInstanceOf(com.ramiart.admin.tuition.application.StudentTuitionAssignmentException.class).extracting("code").isEqualTo("TUITION_LESSON_COUNT_MISMATCH");
+        UUID assignment=(UUID)created.data().get("assignmentId");assertThatThrownBy(()->service.update(assignment,new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Update(start.minusDays(1),null,null,null,0),actorId,UUID.randomUUID(),metadata)).isInstanceOf(com.ramiart.admin.tuition.application.StudentTuitionAssignmentException.class).extracting("code").isEqualTo("TUITION_LESSON_COUNT_MISMATCH");jdbc.update("update student set status='PAUSED' where id=?",target);
+        var ended=service.update(assignment,new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Update(start,start.plusDays(20),null,null,0),actorId,UUID.randomUUID(),metadata);
+        assertThat(ended).containsEntry("effectiveTo",start.plusDays(20));
+        assertThatThrownBy(()->service.update(assignment,new com.ramiart.admin.tuition.application.StudentTuitionAssignmentModels.Update(start,start.plusDays(20),0L,"무상 조정 사유",1),actorId,UUID.randomUUID(),metadata))
+                .isInstanceOf(com.ramiart.admin.tuition.application.StudentTuitionAssignmentException.class).extracting("code").isEqualTo("STUDENT_STATUS_NOT_ASSIGNABLE");
+    }
+
     @Test @DisplayName("MGT-TUITION-ADJUSTMENT adjustment, refund, and cancellations reconcile immutable history")
     void adjustmentAndRefundReconcileBillingAndFinancialLedger() {
         var adjustmentRepository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource));

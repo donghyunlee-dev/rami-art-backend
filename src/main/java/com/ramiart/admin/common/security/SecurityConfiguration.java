@@ -83,6 +83,12 @@ public class SecurityConfiguration {
                                 .hasAuthority("TUITION_POLICY_WRITE")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/tuition-policies/**")
                                 .hasAuthority("TUITION_POLICY_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/students/*/tuition-assignments",
+                                "/api/admin/students/*/tuition-assignment-candidates").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/admin/students/*/tuition-assignments")
+                                .authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/student-tuition-assignments/*")
+                                .authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/admin/tuition-billing-previews/**")
                                 .authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/admin/tuition-billings/batches")
