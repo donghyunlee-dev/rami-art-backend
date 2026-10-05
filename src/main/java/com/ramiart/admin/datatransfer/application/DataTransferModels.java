@@ -19,4 +19,6 @@ public final class DataTransferModels {
             long version, OffsetDateTime expiresAt) {}
     public record RowRecord(int rowNumber, String status, String maskedSummary, String fieldErrorsJson,
             UUID duplicateTargetId, UUID resultTargetId, String errorCode) {}
+    public record ImportedRow(UUID id, int rowNumber, String status, byte[] payloadCiphertext, String dedupHash,
+            String maskedSummary, String fieldErrorsJson, UUID duplicateTargetId, String errorCode) {}
 }

@@ -10,8 +10,8 @@ spring:
     property-naming-strategy: SNAKE_CASE
   servlet:
     multipart:
-      max-file-size: 5MB
-      max-request-size: 6MB
+      max-file-size: 20MB
+      max-request-size: 21MB
   datasource:
     url: ${DATASOURCE_URL}
     username: ${DATASOURCE_USERNAME}
@@ -57,6 +57,7 @@ app:
     gallery-bucket: ${SUPABASE_GALLERY_BUCKET:pub_rami_art_bucket}
     financial-import-bucket: ${SUPABASE_FINANCIAL_IMPORT_BUCKET:rami_financial_imports_private}
     consent-evidence-bucket: ${SUPABASE_CONSENT_EVIDENCE_BUCKET:rami_consent_evidence_private}
+    data-transfer-bucket: ${SUPABASE_DATA_TRANSFER_BUCKET:rami_data_transfers_private}
 
 admin:
   security:

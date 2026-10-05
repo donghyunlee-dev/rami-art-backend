@@ -18,12 +18,26 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.HttpStatus;
 
 @RestController
 @RequestMapping("/api/admin/data-transfer")
 public final class DataTransferController {
     private final DataTransferService service;
     public DataTransferController(DataTransferService service) { this.service = service; }
+
+    @PostMapping("/imports")
+    ResponseEntity<ApiEnvelope<Job>> upload(@RequestPart("domain") String domain,
+            @RequestPart("templateVersion") String templateVersion,
+            @RequestPart("file") MultipartFile file, Authentication authentication, HttpServletRequest request) {
+        Job job = service.upload(domain, templateVersion, file, authentication);
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.LOCATION, "/api/admin/data-transfer/jobs/" + job.id())
+                .body(ApiEnvelope.success(job, RequestIdFilter.get(request)));
+    }
 
     @GetMapping("/templates/{domain}")
     ResponseEntity<byte[]> template(@PathVariable String domain, Authentication authentication) {

@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import static com.ramiart.admin.datatransfer.application.DataTransferModels.ImportedRow;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -37,5 +38,43 @@ public class JdbcDataTransferRepository implements DataTransferRepository {
                         row.getString("masked_summary"), row.getString("field_errors"),
                         row.getObject("duplicate_target_id", UUID.class), row.getObject("result_target_id", UUID.class),
                         row.getString("error_code"))).list();
+    }
+
+    @Override public boolean hasActiveImport(String domain, String sha256) {
+        return jdbc.sql("select exists(select 1 from data_transfer_job where direction='IMPORT' and domain=:domain and sha256=:hash and status not in ('FAILED','EXPIRED'))")
+                .param("domain", domain).param("hash", sha256).query(Boolean.class).single();
+    }
+
+    @Override public void createImport(UUID id, String domain, String version, String fileName, String storageKey,
+            String sha256, long fileSize, UUID actor) {
+        jdbc.sql("""
+                insert into data_transfer_job(id,direction,domain,status,template_version,source_file_name,
+                    storage_key,sha256,file_size,expires_at,created_by)
+                values(:id,'IMPORT',:domain,'PARSING',:version,:name,:key,:hash,:size,
+                    statement_timestamp()+interval '24 hours',:actor)
+                """).param("id", id).param("domain", domain).param("version", version).param("name", fileName)
+                .param("key", storageKey).param("hash", sha256).param("size", fileSize).param("actor", actor).update();
+    }
+
+    @Override public void insertRows(UUID jobId, java.util.Collection<ImportedRow> rows) {
+        for (ImportedRow row : rows) {
+            jdbc.sql("""
+                    insert into data_transfer_row(id,job_id,row_number,status,payload_ciphertext,dedup_hash,
+                        masked_summary,field_errors,duplicate_target_id,error_code)
+                    values(:id,:job,:number,:status,:payload,:hash,:summary,cast(:errors as jsonb),:duplicate,:error)
+                    """).param("id", row.id()).param("job", jobId).param("number", row.rowNumber())
+                    .param("status", row.status()).param("payload", row.payloadCiphertext()).param("hash", row.dedupHash())
+                    .param("summary", row.maskedSummary()).param("errors", row.fieldErrorsJson())
+                    .param("duplicate", row.duplicateTargetId()).param("error", row.errorCode()).update();
+        }
+    }
+
+    @Override public void markImportReady(UUID jobId, int total, int valid, int invalid, int duplicates) {
+        jdbc.sql("""
+                update data_transfer_job set status='READY',total_count=:total,valid_count=:valid,
+                    invalid_count=:invalid,duplicate_count=:duplicates,version=version+1
+                 where id=:id and status='PARSING'
+                """).param("total", total).param("valid", valid).param("invalid", invalid)
+                .param("duplicates", duplicates).param("id", jobId).update();
     }
 }

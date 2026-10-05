@@ -2,6 +2,7 @@ package com.ramiart.admin.auth.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 
 import com.rami.artstudio.RamiArtBackendApplication;
 import com.rami.artstudio.support.LegacyFlywayTestBootstrap;
@@ -12,6 +13,7 @@ import com.ramiart.admin.auth.application.AuthSessionService.IssuedSession;
 import com.ramiart.admin.auth.application.PasswordChangeService;
 import com.ramiart.admin.auth.application.PasswordVerifier;
 import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.ramiart.admin.datatransfer.application.DataTransferStorage;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.net.URI;
@@ -41,12 +43,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest(classes = RamiArtBackendApplication.class,
         properties = {"spring.flyway.enabled=true", "spring.jackson.property-naming-strategy=SNAKE_CASE"},
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthPersistenceIntegrationTest {
+
+    @MockitoBean
+    private DataTransferStorage dataTransferStorage;
 
     private static final String OWNER_EMAIL = "owner@rami.local";
     private static final String TEMPORARY_PASSWORD = "LocalOnly!Change123";
@@ -633,12 +639,108 @@ class AuthPersistenceIntegrationTest {
         assertThat(other.statusCode()).isEqualTo(404);
     }
 
+    @Test
+    void sessionPolicyHistoryIsReadableToOwnerAndNeverCached() throws Exception {
+        createRoleUser("OWNER", "session-policy-reader@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "session-policy-reader@rami.local", TEMPORARY_PASSWORD, null, metadata("req_policy_read")).rawToken();
+
+        HttpResponse<String> anonymous = http("GET", "/api/admin/session-policies?size=20", null, null, null);
+        HttpResponse<String> allowed = http("GET", "/api/admin/session-policies?size=20", cookie, null, null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(allowed.statusCode()).as(allowed.body()).isEqualTo(200);
+        assertThat(allowed.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(allowed.body()).contains("current", "history", "maxFailedAttempts", "absoluteTimeoutMinutes")
+                .doesNotContain("password_hash", "token_hash");
+    }
+
+    @Test
+    void sessionPolicyChangeIsIdempotentAndDoesNotRewriteExistingSessionPolicy() throws Exception {
+        createRoleUser("OWNER", "session-policy-writer@rami.local");
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class,
+                "session-policy-writer@rami.local");
+        IssuedSession session = authSessionService.login("session-policy-writer@rami.local", TEMPORARY_PASSWORD,
+                null, metadata("req_policy_write_login"));
+        UUID previousId = jdbcTemplate.queryForObject("select policy_id from admin_session where admin_user_id=? order by issued_at desc limit 1",
+                UUID.class, actor);
+        UUID key = UUID.randomUUID();
+        UUID currentId = jdbcTemplate.queryForObject("select id from admin_session_policy where effective_to is null", UUID.class);
+        String body = """
+                {"currentPolicyId":"%s","maxFailedAttempts":6,"lockDurationMinutes":45,
+                 "idleTimeoutMinutes":75,"absoluteTimeoutMinutes":720,"expiryWarningMinutes":6,
+                 "changeReason":"운영 접근 정책 조정"}
+                """.formatted(currentId);
+        String cookie = "__Host-rami_admin_session=" + session.rawToken();
+
+        HttpResponse<String> first = httpWithKey("POST", "/api/admin/session-policies", cookie, body, key);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/session-policies", cookie, body, key);
+
+        assertThat(first.statusCode()).as(first.body()).isEqualTo(201);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(201);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from admin_session_policy", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='SESSION_POLICY_CHANGED'", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select policy_id from admin_session where admin_user_id=? order by issued_at desc limit 1",
+                UUID.class, actor)).isEqualTo(previousId);
+    }
+
+    @Test
+    void dataTransferStudentUploadStoresEncryptedPreviewAndReturnsNoRawData() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-upload@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-upload@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_upload_login")).rawToken();
+        String csv = "studentName,birthday,joinedAt,guardianName,relationship,guardianPhone,guardianEmail,courseCode,classGroupCode\r\n"
+                + "Minji Park,2015-05-01,2023-03-01,Guardian,MOTHER,01012345678,parent@example.com,ART,CLASS-A\r\n";
+
+        HttpResponse<String> response = multipart("/api/admin/data-transfer/imports", cookie,
+                "STUDENT", "STUDENT_V1", "students.csv", csv);
+
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+        assertThat(response.body()).contains("READY", "totalCount", "validCount").doesNotContain("Minji", "01012345678", "private/");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where domain='STUDENT' and created_by=(select id from admin_user where email=?)",
+                Integer.class, "data-transfer-upload@rami.local")).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_row r join data_transfer_job j on j.id=r.job_id where j.domain='STUDENT' and r.status='VALID' and r.payload_ciphertext is not null",
+                Integer.class)).isOne();
+    }
+
+    @Test
+    void dataTransferRejectsAnActiveFileHashDuplicateBeforeStorageUpload() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-duplicate@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-duplicate@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_duplicate_login")).rawToken();
+        String csv = "attendanceSessionId,studentId,attendanceStatus\r\n"
+                + "2d430adb-80c5-4c53-a770-60ed72cc3158,3d0b6d0a-a76e-4053-a6d4-f08470d156e1,PRESENT\r\n";
+
+        HttpResponse<String> first = multipart("/api/admin/data-transfer/imports", cookie,
+                "ATTENDANCE", "ATTENDANCE_V1", "attendance.csv", csv);
+        HttpResponse<String> duplicate = multipart("/api/admin/data-transfer/imports", cookie,
+                "ATTENDANCE", "ATTENDANCE_V1", "attendance.csv", csv);
+
+        assertThat(first.statusCode()).as(first.body()).isEqualTo(201);
+        assertThat(duplicate.statusCode()).isEqualTo(409);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where domain='ATTENDANCE'", Integer.class)).isOne();
+        verify(dataTransferStorage).upload(org.mockito.ArgumentMatchers.startsWith("data-transfers/"), org.mockito.ArgumentMatchers.any());
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")
                 .header("Cookie",cookie).header("Origin","http://localhost:3000").header("Idempotency-Key",key.toString())
                 .method(method,HttpRequest.BodyPublishers.ofString(body)).build();
         try(var client=HttpClient.newHttpClient()) { return client.send(request,HttpResponse.BodyHandlers.ofString()); }
+    }
+
+    private HttpResponse<String> multipart(String path, String cookie, String domain, String version, String filename, String csv)
+            throws IOException, InterruptedException {
+        String boundary = "rami-boundary-7f3c";
+        String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"domain\"\r\n\r\n" + domain + "\r\n"
+                + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"templateVersion\"\r\n\r\n" + version + "\r\n"
+                + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n"
+                + "Content-Type: text/csv; charset=utf-8\r\n\r\n" + csv + "\r\n--" + boundary + "--\r\n";
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary).header("Cookie", cookie)
+                .header("Origin", "http://localhost:3000").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+        try (var client = HttpClient.newHttpClient()) { return client.send(request, HttpResponse.BodyHandlers.ofString()); }
     }
 
     @Test
