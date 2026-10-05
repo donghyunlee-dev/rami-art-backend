@@ -14,6 +14,8 @@ import com.ramiart.admin.dashboard.application.DashboardRepository.Birthday;
 import com.ramiart.admin.dashboard.application.DashboardService;
 import com.ramiart.admin.dashboard.application.DashboardRepository.InquiryMetrics;
 import com.ramiart.admin.dashboard.application.DashboardRepository.TuitionMetrics;
+import com.ramiart.admin.dashboard.application.MonthlyDashboardService;
+import com.ramiart.admin.dashboard.infrastructure.JdbcMonthlyDashboardRepository;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -144,6 +146,36 @@ class DashboardRepositoryIntegrationTest {
         assertThat(summary).isNotNull();
         assertThat(summary.widgets().get("attendance").toString()).contains("UNAVAILABLE");
         assertThat(summary.widgets().get("tuition").toString()).contains("AVAILABLE");
+    }
+
+    @Test
+    void monthlyDashboardUsesAllowedWindowAndOmitsWidgetsWithoutSourcePermission() {
+        var service = new MonthlyDashboardService(new JdbcMonthlyDashboardRepository(JdbcClient.create(dataSource)),
+                Clock.systemUTC(), dataSource, "Asia/Seoul");
+        var now = java.time.YearMonth.now(Clock.systemUTC());
+        var permitted = new TestingAuthenticationToken("dashboard-test", "", "DASHBOARD_READ", "ATTENDANCE_READ");
+        var monthlyRepository = new JdbcMonthlyDashboardRepository(JdbcClient.create(dataSource));
+        Map<String,Object> tuition = monthlyRepository.tuition(now);
+        assertThat(tuition).containsKeys("chargeAmount", "paidAmount", "refundAmount", "outstandingAmount", "creditAmount", "previousMonth");
+        assertThat(((Map<?,?>)tuition.get("previousMonth")).keySet().toString())
+                .contains("chargeAmount", "paidAmount", "refundAmount", "outstandingAmount", "creditAmount");
+        assertThat(monthlyRepository.attendance(now)).containsKeys("targetCount", "attendedCount", "absentCount", "pendingCount", "rate", "daily");
+        assertThat(monthlyRepository.lessons(now)).containsKeys("scheduledCount", "plannedCount", "closedCount", "finalizedLogCount", "missingLogCount");
+        assertThat(monthlyRepository.enrollment(now, java.time.ZoneId.of("Asia/Seoul"))).containsKeys("newCount", "trialCount", "waitlistedCount", "enrolledCount", "lostCount", "conversionRate");
+        assertThat(monthlyRepository.capacity(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")))).containsKey("items");
+
+        var summary = service.monthly(now, "req_monthly_dashboard", permitted);
+
+        assertThat(summary.widgets()).containsOnlyKeys("attendance");
+        assertThat(summary.widgets().get("attendance").toString())
+                .contains("targetCount", "attendedCount", "pendingCount", "daily", now.toString());
+        assertThatThrownBy(() -> service.monthly(now.minusMonths(12), "req_monthly_old", permitted))
+                .isInstanceOf(MonthlyDashboardService.MonthlyDashboardException.class)
+                .extracting("code").isEqualTo("DASHBOARD_MONTH_NOT_SUPPORTED");
+        assertThatThrownBy(() -> service.monthly(now, "req_monthly_forbidden",
+                new TestingAuthenticationToken("dashboard-test", "", "ATTENDANCE_READ")))
+                .isInstanceOf(MonthlyDashboardService.MonthlyDashboardException.class)
+                .extracting("code").isEqualTo("DASHBOARD_ACCESS_DENIED");
     }
 
     private static Path projectRoot() {

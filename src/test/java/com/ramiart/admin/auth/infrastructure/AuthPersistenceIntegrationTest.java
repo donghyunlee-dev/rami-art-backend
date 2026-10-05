@@ -572,6 +572,25 @@ class AuthPersistenceIntegrationTest {
         assertThat(http("GET", "/api/public/gallery-artworks?page=1&size=24", null, null, null).body()).doesNotContain(artwork.toString(), "푸른 물결");
     }
 
+    @Test
+    void monthlyDashboardRequiresSessionAndReturnsMonthScopedReadOnlySummary() throws Exception {
+        createRoleUser("OWNER", "monthly-dashboard-owner@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "monthly-dashboard-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_monthly_dashboard")).rawToken();
+        String month = java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul")).toString();
+
+        HttpResponse<String> anonymous = http("GET", "/api/admin/dashboard/monthly?month=" + month, null, null, null);
+        HttpResponse<String> authorized = http("GET", "/api/admin/dashboard/monthly?month=" + month, cookie, null, null);
+        HttpResponse<String> invalidMonth = http("GET", "/api/admin/dashboard/monthly?month=not-a-month", cookie, null, null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(authorized.statusCode()).as(authorized.body()).isEqualTo(200);
+        assertThat(authorized.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(authorized.body()).contains("\"month\":\"" + month + "\"", "\"tuition\"", "\"attendance\"", "\"lessons\"", "\"enrollment\"", "\"capacity\"");
+        assertThat(invalidMonth.statusCode()).isEqualTo(400);
+        assertThat(invalidMonth.body()).contains("DASHBOARD_MONTH_NOT_SUPPORTED");
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")

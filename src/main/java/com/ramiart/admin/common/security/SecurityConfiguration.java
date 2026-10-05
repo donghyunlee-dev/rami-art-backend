@@ -54,6 +54,8 @@ public class SecurityConfiguration {
                                 .hasAuthority("BLOG_READ")
                         .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/summary")
                                 .authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/monthly")
+                                .authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/admin/tuition-billings/*/payments")
                                 .hasAuthority("TUITION_PAYMENT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/tuition-billings/*/payments",
