@@ -8,7 +8,12 @@ import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
 import com.ramiart.admin.dev.PostgresScriptRunner;
 import com.ramiart.admin.dashboard.application.DashboardRepository;
+import com.ramiart.admin.dashboard.application.DashboardRepository.AttendanceMetrics;
+import com.ramiart.admin.dashboard.application.DashboardRepository.AuditActivity;
+import com.ramiart.admin.dashboard.application.DashboardRepository.Birthday;
 import com.ramiart.admin.dashboard.application.DashboardService;
+import com.ramiart.admin.dashboard.application.DashboardRepository.InquiryMetrics;
+import com.ramiart.admin.dashboard.application.DashboardRepository.TuitionMetrics;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -28,10 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.security.authentication.TestingAuthenticationToken;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DashboardRepositoryIntegrationTest {
@@ -100,14 +102,10 @@ class DashboardRepositoryIntegrationTest {
         assertThat(recordedActivity.actorDisplay()).isNotBlank();
         assertThat(recordedActivity.targetDisplay()).contains("•").doesNotContain("대시보드 통합 원생");
 
-        var transactionManager = new DataSourceTransactionManager(dataSource);
-        var snapshot = new TransactionTemplate(transactionManager);
-        snapshot.setReadOnly(true);
-        snapshot.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
-        var service = new DashboardService(repository, Clock.systemUTC(), transactionManager, "Asia/Seoul");
+        var service = new DashboardService(repository, Clock.systemUTC(), dataSource, "Asia/Seoul");
         var authentication = new TestingAuthenticationToken("dashboard-test", "",
                 "DASHBOARD_READ", "ATTENDANCE_READ", "TUITION_BILLING_READ", "INQUIRY_READ", "STUDENT_READ", "AUDIT_READ");
-        var summary = snapshot.execute(status -> service.summary(today, "req_dashboard_test", authentication));
+        var summary = service.summary(today, "req_dashboard_test", authentication);
         assertThat(summary).isNotNull();
         assertThat(summary.widgets()).containsKeys("attendance", "tuition", "inquiries", "birthdays", "recentActivities");
         assertThat(summary.widgets().get("birthdays").toString()).contains("대시보드 통합 원생");
@@ -120,6 +118,32 @@ class DashboardRepositoryIntegrationTest {
         assertThatThrownBy(() -> service.summary(today.minusDays(1), "req_dashboard_date", authentication))
                 .isInstanceOf(DashboardService.DashboardException.class)
                 .extracting("code").isEqualTo("DASHBOARD_DATE_NOT_SUPPORTED");
+    }
+
+    @Test
+    void failedWidgetRollsBackToSavepointAndLaterWidgetsStillQuery() {
+        DashboardRepository failingAttendance = new DashboardRepository() {
+            @Override public AttendanceMetrics attendance(LocalDate date) {
+                jdbc.execute("select 1 / 0");
+                return repository.attendance(date);
+            }
+            @Override public TuitionMetrics overdueTuition(LocalDate today) { return repository.overdueTuition(today); }
+            @Override public InquiryMetrics inquiries(LocalDate today, java.time.ZoneId zone) { return repository.inquiries(today, zone); }
+            @Override public java.util.List<Birthday> birthdays(LocalDate today, LocalDate end, int limit) {
+                return repository.birthdays(today, end, limit);
+            }
+            @Override public java.util.List<AuditActivity> recentActivities(int limit) { return repository.recentActivities(limit); }
+        };
+        var service = new DashboardService(failingAttendance, Clock.systemUTC(), dataSource, "Asia/Seoul");
+        var authentication = new TestingAuthenticationToken("dashboard-test", "",
+                "DASHBOARD_READ", "ATTENDANCE_READ", "TUITION_BILLING_READ");
+
+        var summary = service.summary(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),
+                "req_dashboard_savepoint", authentication);
+
+        assertThat(summary).isNotNull();
+        assertThat(summary.widgets().get("attendance").toString()).contains("UNAVAILABLE");
+        assertThat(summary.widgets().get("tuition").toString()).contains("AVAILABLE");
     }
 
     private static Path projectRoot() {

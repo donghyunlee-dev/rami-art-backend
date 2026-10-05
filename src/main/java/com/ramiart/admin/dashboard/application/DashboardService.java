@@ -12,14 +12,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -28,20 +27,29 @@ public class DashboardService {
     private final DashboardRepository repository;
     private final Clock clock;
     private final ZoneId studioZone;
+    private final TransactionTemplate snapshotRead;
     private final TransactionTemplate nestedRead;
 
-    public DashboardService(DashboardRepository repository, Clock clock, PlatformTransactionManager transactionManager,
+    public DashboardService(DashboardRepository repository, Clock clock, DataSource dataSource,
             @Value("${admin.dashboard.studio-zone:${ADMIN_STUDIO_ZONE:Asia/Seoul}}") String studioZone) {
         this.repository = repository;
         this.clock = clock;
         this.studioZone = ZoneId.of(studioZone);
+        var transactionManager = new DataSourceTransactionManager(dataSource);
+        this.snapshotRead = new TransactionTemplate(transactionManager);
+        this.snapshotRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        this.snapshotRead.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        this.snapshotRead.setReadOnly(true);
         this.nestedRead = new TransactionTemplate(transactionManager);
         this.nestedRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         this.nestedRead.setReadOnly(true);
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Summary summary(LocalDate requestedDate, String requestId, Authentication authentication) {
+        return snapshotRead.execute(status -> loadSummary(requestedDate, requestId, authentication));
+    }
+
+    private Summary loadSummary(LocalDate requestedDate, String requestId, Authentication authentication) {
         if (!has(authentication, "DASHBOARD_READ")) throw new DashboardException("DASHBOARD_ACCESS_DENIED");
         OffsetDateTime asOf = OffsetDateTime.now(clock).atZoneSameInstant(studioZone).toOffsetDateTime();
         LocalDate today = asOf.toLocalDate();
