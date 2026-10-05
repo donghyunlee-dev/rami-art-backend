@@ -284,6 +284,20 @@ class AuthPersistenceIntegrationTest {
         assertThat(httpWithKey("POST","/api/admin/financial-entries",contentCookie,body,UUID.randomUUID()).statusCode()).isEqualTo(403);
     }
 
+    @Test
+    void financialImportHttpEndpointsRequireReadAndImportPermissions() throws Exception {
+        createRoleUser("FINANCE","finance-import@rami.local");
+        createRoleUser("CONTENT","content-import@rami.local");
+        String financeCookie="__Host-rami_admin_session="+authSessionService.login("finance-import@rami.local",TEMPORARY_PASSWORD,null,metadata("req_finance_import")).rawToken();
+        String contentCookie="__Host-rami_admin_session="+authSessionService.login("content-import@rami.local",TEMPORARY_PASSWORD,null,metadata("req_content_import")).rawToken();
+        String batch="00000000-0000-0000-0000-000000000099";
+        assertThat(http("GET","/api/admin/financial-imports/"+batch,financeCookie,null,null).statusCode()).isEqualTo(404);
+        assertThat(http("GET","/api/admin/financial-imports/"+batch,contentCookie,null,null).statusCode()).isEqualTo(403);
+        assertThat(http("GET","/api/admin/financial-imports/"+batch,null,null,null).statusCode()).isEqualTo(401);
+        assertThat(httpWithIdempotency("POST","/api/admin/financial-imports",contentCookie,"{}")
+                .statusCode()).isEqualTo(403);
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")

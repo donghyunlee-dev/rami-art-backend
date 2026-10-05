@@ -8,6 +8,10 @@ spring:
     active: local
   jackson:
     property-naming-strategy: SNAKE_CASE
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: ${DATASOURCE_URL}
     username: ${DATASOURCE_USERNAME}
@@ -51,6 +55,7 @@ app:
     supabase-url: ${SUPABASE_URL:}
     service-key: ${SUPABASE_SERVICE_KEY:}
     gallery-bucket: ${SUPABASE_GALLERY_BUCKET:pub_rami_art_bucket}
+    financial-import-bucket: ${SUPABASE_FINANCIAL_IMPORT_BUCKET:rami_financial_imports_private}
 
 admin:
   security:

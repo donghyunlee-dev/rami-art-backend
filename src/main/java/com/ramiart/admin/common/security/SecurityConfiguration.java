@@ -63,6 +63,12 @@ public class SecurityConfiguration {
                                 .hasAuthority("FINANCE_READ")
                         .requestMatchers(HttpMethod.GET, "/api/admin/finance-settlements", "/api/admin/finance-settlements/**")
                                 .hasAuthority("FINANCE_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/financial-imports", "/api/admin/financial-imports/**")
+                                .hasAuthority("FINANCE_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/financial-imports")
+                                .hasAuthority("FINANCE_IMPORT")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/financial-imports/*/confirmations")
+                                .hasAuthority("FINANCE_IMPORT")
                         .requestMatchers(HttpMethod.POST, "/api/admin/financial-entries",
                                 "/api/admin/financial-entries/*/cancellations")
                                 .hasAuthority("FINANCE_WRITE")
