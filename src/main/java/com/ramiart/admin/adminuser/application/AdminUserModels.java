@@ -15,4 +15,17 @@ public final class AdminUserModels {
     public record ListResponse(List<Summary> items, int page, int size, long totalElements,
             int totalPages, String sort) {}
     public record Query(String keyword, String role, String status, int page, int size, String sort) {}
+    public record ChangeRoleRequest(String roleCode, long version) {}
+    public record CurrentSessionImpact(boolean selfChanged, boolean permissionsChanged,
+            boolean canStayOnCurrentRoute, String redirectTo) {}
+    public record RoleChangeResponse(Summary user, CurrentSessionImpact currentSessionImpact) {}
+    public record CreateRequest(String displayName, String email, String roleCode) {}
+    public record CreatedResponse(Summary user, String temporaryPassword,
+            java.time.OffsetDateTime temporaryPasswordExpiresAt) {}
+    public record StatusRequest(String toStatus, String reason, long version) {}
+    public record StatusResponse(Summary user, int revokedSessionCount, java.time.OffsetDateTime changedAt) {}
+    public record VersionRequest(long version) {}
+    public record UnlockResponse(Summary user, java.time.OffsetDateTime unlockedAt) {}
+    public record TemporaryPasswordResponse(Summary user, String temporaryPassword,
+            java.time.OffsetDateTime temporaryPasswordExpiresAt, int revokedSessionCount) {}
 }

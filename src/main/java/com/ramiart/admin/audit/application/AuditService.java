@@ -188,6 +188,11 @@ public class AuditService {
     private static Map<String, Action> actions() {
         Map<String, Action> values = new LinkedHashMap<>();
         register(values, "ADMIN_REAUTHENTICATED", "민감 작업 재인증", "MGT-AUTH-REAUTHENTICATE", "SECURITY", "ADMIN_SESSION", null, null);
+        register(values, "ADMIN_ROLE_CHANGED", "관리자 역할 변경", "MGT-ADMIN-ACCOUNT", "PRIVILEGE", "ADMIN_USER", "/admin/settings/admin-users", "ADMIN_ACCOUNT_READ", "beforeRole", "afterRole");
+        register(values, "ADMIN_USER_CREATED", "관리자 계정 생성", "MGT-ADMIN-ACCOUNT", "PRIVILEGE", "ADMIN_USER", "/admin/settings/admin-users", "ADMIN_ACCOUNT_READ", "roleCode");
+        register(values, "ADMIN_STATUS_CHANGED", "관리자 계정 상태 변경", "MGT-ADMIN-ACCOUNT", "PRIVILEGE", "ADMIN_USER", "/admin/settings/admin-users", "ADMIN_ACCOUNT_READ", "fromStatus", "toStatus", "reasonLength");
+        register(values, "ADMIN_USER_UNLOCKED", "관리자 로그인 잠금 해제", "MGT-ADMIN-ACCOUNT", "SECURITY", "ADMIN_USER", "/admin/settings/admin-users", "ADMIN_ACCOUNT_READ");
+        register(values, "ADMIN_TEMP_PASSWORD_ISSUED", "임시 비밀번호 발급", "MGT-ADMIN-ACCOUNT", "SECURITY", "ADMIN_USER", "/admin/settings/admin-users", "ADMIN_ACCOUNT_READ");
         register(values, "STUDENT_CREATED", "원생 등록", "MGT-STUDENT-CREATE", "OPERATION", "STUDENT", "/admin/students/{targetId}", "STUDENT_READ", "guardianCount");
         register(values, "STUDENT_UPDATED", "원생 정보 수정", "MGT-STUDENT-EDIT", "OPERATION", "STUDENT", "/admin/students/{targetId}", "STUDENT_READ", "guardianCount", "previousVersion");
         register(values, "STUDENT_STATUS_CHANGED", "원생 상태 변경", "MGT-STUDENT-STATUS", "PRIVILEGE", "STUDENT", "/admin/students/{targetId}", "STUDENT_READ", "fromStatus", "toStatus", "reasonLength", "previousVersion");

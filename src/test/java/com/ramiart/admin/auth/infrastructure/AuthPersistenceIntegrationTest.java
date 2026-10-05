@@ -113,15 +113,25 @@ class AuthPersistenceIntegrationTest {
 
     private HttpResponse<String> http(String method, String path, String cookie, String origin, String body)
             throws IOException, InterruptedException {
+        return http(method, path, cookie, origin, body, null);
+    }
+
+    private HttpResponse<String> http(String method, String path, String cookie, String origin, String body, String idempotencyKey)
+            throws IOException, InterruptedException {
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Content-Type", "application/json")
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(body));
         if (cookie != null) builder.header("Cookie", cookie);
         if (origin != null) builder.header("Origin", origin);
+        if (idempotencyKey != null) builder.header("Idempotency-Key", idempotencyKey);
         try (var client = HttpClient.newHttpClient()) {
             return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode responseData(String response) throws IOException {
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(response).path("data");
     }
 
     @DynamicPropertySource
@@ -933,6 +943,127 @@ class AuthPersistenceIntegrationTest {
         assertThat(listed.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
         assertThat(listed.body()).contains("account-owner@rami.local", "account-operator@rami.local")
                 .contains("totalElements", "passwordMustChange", "actions");
+    }
+
+    @Test
+    void adminUserRoleChangeUsesVersionAuditAndIdempotentReplay() throws Exception {
+        createRoleUser("OWNER", "role-owner@rami.local");
+        createRoleUser("OPERATOR", "role-target@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "role-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_admin_role_change_login")).rawToken();
+        UUID targetId = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class, "role-target@rami.local");
+        UUID ownerId = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class, "role-owner@rami.local");
+        UUID key = UUID.randomUUID();
+        String body = "{\"roleCode\":\"CONTENT\",\"version\":0}";
+
+        HttpResponse<String> changed = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
+                "http://localhost:3000", body, key.toString());
+        HttpResponse<String> replay = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
+                "http://localhost:3000", body, key.toString());
+        HttpResponse<String> stale = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
+                "http://localhost:3000", "{\"roleCode\":\"FINANCE\",\"version\":0}", UUID.randomUUID().toString());
+        jdbcTemplate.update("update admin_user_role set admin_role_id=(select id from admin_role where code='OPERATOR') where admin_user_id=(select id from admin_user where email=?)", OWNER_EMAIL);
+        HttpResponse<String> lastOwner = http("PUT", "/api/admin/users/" + ownerId + "/role", ownerCookie,
+                "http://localhost:3000", "{\"roleCode\":\"CONTENT\",\"version\":1}", UUID.randomUUID().toString());
+
+        assertThat(changed.statusCode()).as(changed.body()).isEqualTo(200);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(responseData(replay.body())).isEqualTo(responseData(changed.body()));
+        assertThat(changed.body()).contains("CONTENT", "version", "currentSessionImpact");
+        assertThat(stale.statusCode()).isEqualTo(409);
+        assertThat(lastOwner.statusCode()).isEqualTo(409);
+        assertThat(lastOwner.body()).contains("LAST_OWNER_REQUIRED");
+        assertThat(jdbcTemplate.queryForObject("select r.code from admin_user_role ur join admin_role r on r.id=ur.admin_role_id where ur.admin_user_id=?", String.class, targetId)).isEqualTo("CONTENT");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_ROLE_CHANGED' and target_id=?", Integer.class, targetId)).isOne();
+    }
+
+    @Test
+    void adminUserCreationProtectsTemporaryPasswordAndAllowsOneEncryptedReplay() throws Exception {
+        createRoleUser("OWNER", "create-owner@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "create-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_admin_create_login")).rawToken();
+        UUID key = UUID.randomUUID();
+        String body = "{\"displayName\":\"신규 담당\",\"email\":\"NEW-STAFF@example.com\",\"roleCode\":\"OPERATOR\"}";
+
+        HttpResponse<String> created = http("POST", "/api/admin/users", ownerCookie, "http://localhost:3000", body, key.toString());
+        HttpResponse<String> replay = http("POST", "/api/admin/users", ownerCookie, "http://localhost:3000", body, key.toString());
+        HttpResponse<String> consumed = http("POST", "/api/admin/users", ownerCookie, "http://localhost:3000", body, key.toString());
+
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(201);
+        assertThat(responseData(replay.body())).isEqualTo(responseData(created.body()));
+        assertThat(created.body()).contains("temporaryPassword", "temporaryPasswordExpiresAt");
+        var passwordPattern = java.util.regex.Pattern.compile("\\\"temporaryPassword\\\":\\\"([^\\\"]+)\\\"");
+        String firstPassword = passwordPattern.matcher(created.body()).results().findFirst().orElseThrow().group(1);
+        assertThat(replay.body()).contains("\"temporaryPassword\":\"" + firstPassword + "\"");
+        assertThat(consumed.statusCode()).isEqualTo(409);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from admin_user where email='new-staff@example.com' and password_must_change=true", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_USER_CREATED'", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from idempotency_record where scope like 'ADMIN_USER_CREATE:%' and encrypted_response is not null", Integer.class)).isOne();
+    }
+
+    @Test
+    void adminUserDeactivationRevokesSessionsAndPreventsSelfDeactivation() throws Exception {
+        createRoleUser("OWNER", "status-owner@rami.local");
+        createRoleUser("OPERATOR", "status-target@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "status-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_admin_status_owner_login")).rawToken();
+        String targetToken = authSessionService.login("status-target@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_admin_status_target_login")).rawToken();
+        UUID targetId = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class, "status-target@rami.local");
+        UUID key = UUID.randomUUID();
+        String body = "{\"toStatus\":\"INACTIVE\",\"reason\":\"담당 업무 종료\",\"version\":1}";
+
+        HttpResponse<String> changed = http("POST", "/api/admin/users/" + targetId + "/status-changes", ownerCookie,
+                "http://localhost:3000", body, key.toString());
+        HttpResponse<String> replay = http("POST", "/api/admin/users/" + targetId + "/status-changes", ownerCookie,
+                "http://localhost:3000", body, key.toString());
+        HttpResponse<String> self = http("POST", "/api/admin/users/" + UUID.nameUUIDFromBytes("test-admin-OWNER".getBytes(java.nio.charset.StandardCharsets.UTF_8)) + "/status-changes",
+                ownerCookie, "http://localhost:3000", "{\"toStatus\":\"INACTIVE\",\"reason\":\"담당 업무 종료\",\"version\":1}", UUID.randomUUID().toString());
+
+        assertThat(changed.statusCode()).as(changed.body()).isEqualTo(201);
+        assertThat(replay.statusCode()).isEqualTo(201);
+        assertThat(responseData(replay.body())).isEqualTo(responseData(changed.body()));
+        assertThat(changed.body()).contains("INACTIVE", "revokedSessionCount");
+        assertThat(self.statusCode()).isEqualTo(422);
+        assertThat(http("GET", "/api/admin/auth/sessions/current", "__Host-rami_admin_session=" + targetToken, null, null).statusCode()).isEqualTo(401);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from admin_session where admin_user_id=? and revoke_reason='USER_DISABLED'", Integer.class, targetId)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_STATUS_CHANGED' and target_id=?", Integer.class, targetId)).isOne();
+    }
+
+    @Test
+    void adminUserUnlockAndTemporaryPasswordAreVersionedAndSingleReveal() throws Exception {
+        createRoleUser("OWNER", "credential-owner@rami.local");
+        createRoleUser("OPERATOR", "unlock-target@rami.local");
+        createRoleUser("FINANCE", "password-target@rami.local");
+        String ownerCookie="__Host-rami_admin_session="+authSessionService.login("credential-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_admin_credential_owner")).rawToken();
+        UUID unlockId=jdbcTemplate.queryForObject("select id from admin_user where email=?",UUID.class,"unlock-target@rami.local");
+        UUID passwordId=jdbcTemplate.queryForObject("select id from admin_user where email=?",UUID.class,"password-target@rami.local");
+        jdbcTemplate.update("update admin_user set status='LOCKED',locked_until=now()+interval '30 minutes',failed_login_count=5 where id=?",unlockId);
+        UUID unlockKey=UUID.randomUUID();
+        HttpResponse<String> unlocked=http("POST","/api/admin/users/"+unlockId+"/unlocking",ownerCookie,"http://localhost:3000","{\"version\":0}",unlockKey.toString());
+        HttpResponse<String> unlockReplay=http("POST","/api/admin/users/"+unlockId+"/unlocking",ownerCookie,"http://localhost:3000","{\"version\":0}",unlockKey.toString());
+
+        String targetToken=authSessionService.login("password-target@rami.local",TEMPORARY_PASSWORD,null,metadata("req_password_target_login")).rawToken();
+        UUID passwordKey=UUID.randomUUID();
+        HttpResponse<String> issued=http("POST","/api/admin/users/"+passwordId+"/temporary-password-issuances",ownerCookie,"http://localhost:3000","{\"version\":1}",passwordKey.toString());
+        HttpResponse<String> replay=http("POST","/api/admin/users/"+passwordId+"/temporary-password-issuances",ownerCookie,"http://localhost:3000","{\"version\":1}",passwordKey.toString());
+        HttpResponse<String> consumed=http("POST","/api/admin/users/"+passwordId+"/temporary-password-issuances",ownerCookie,"http://localhost:3000","{\"version\":1}",passwordKey.toString());
+
+        assertThat(unlocked.statusCode()).as(unlocked.body()).isEqualTo(201);
+        assertThat(unlockReplay.statusCode()).isEqualTo(201);
+        assertThat(responseData(unlockReplay.body())).isEqualTo(responseData(unlocked.body()));
+        assertThat(issued.statusCode()).as(issued.body()).isEqualTo(201);
+        assertThat(replay.statusCode()).isEqualTo(201);
+        assertThat(responseData(replay.body())).isEqualTo(responseData(issued.body()));
+        assertThat(consumed.statusCode()).isEqualTo(409);
+        assertThat(issued.body()).contains("temporaryPassword", "passwordMustChange");
+        String secret=java.util.regex.Pattern.compile("\\\"temporaryPassword\\\":\\\"([^\\\"]+)\\\"").matcher(issued.body()).results().findFirst().orElseThrow().group(1);
+        assertThat(replay.body()).contains("\"temporaryPassword\":\""+secret+"\"");
+        assertThat(passwordVerifier.matches(secret,jdbcTemplate.queryForObject("select password_hash from admin_user where id=?",String.class,passwordId))).isTrue();
+        assertThat(http("GET","/api/admin/auth/sessions/current","__Host-rami_admin_session="+targetToken,null,null).statusCode()).isEqualTo(401);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_USER_UNLOCKED' and target_id=?",Integer.class,unlockId)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_TEMP_PASSWORD_ISSUED' and target_id=?",Integer.class,passwordId)).isOne();
     }
 
     @Test
