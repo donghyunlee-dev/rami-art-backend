@@ -69,6 +69,15 @@ public class SecurityConfiguration {
                                 .hasAuthority("FINANCE_IMPORT")
                         .requestMatchers(HttpMethod.POST, "/api/admin/financial-imports/*/confirmations")
                                 .hasAuthority("FINANCE_IMPORT")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/consent-policies", "/api/admin/students/*/consents",
+                                "/api/admin/student-consents/*/evidence-url")
+                                .hasAuthority("CONSENT_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/consent-policies/*/draft",
+                                "/api/admin/consent-policies/draft/*/publish", "/api/admin/students/*/consents",
+                                "/api/admin/student-consents/*/revocation")
+                                .hasAuthority("CONSENT_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/consent-policies/draft/*")
+                                .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/financial-entries",
                                 "/api/admin/financial-entries/*/cancellations")
                                 .hasAuthority("FINANCE_WRITE")

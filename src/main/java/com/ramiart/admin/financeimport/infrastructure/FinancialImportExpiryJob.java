@@ -18,7 +18,7 @@ public class FinancialImportExpiryJob {
         this.storage=storage;
     }
 
-    @Scheduled(fixedDelayString="${admin.financial-import.expiry-delay-ms:3600000}")
+    @Scheduled(fixedDelayString="${admin.financial-import.expiry-delay-ms:3600000}",initialDelayString="${admin.financial-import.expiry-initial-delay-ms:3600000}")
     public void expireFiles(){
         for(FinancialImportRepository.ExpiringFile file:repository.expiringFiles(50)){
             try{

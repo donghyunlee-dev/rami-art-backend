@@ -298,6 +298,59 @@ class AuthPersistenceIntegrationTest {
                 .statusCode()).isEqualTo(403);
     }
 
+    @Test
+    void consentHttpEndpointsRequireReadAndWritePermissions() throws Exception {
+        assertThat(jdbcTemplate.queryForObject("select to_regclass('public.consent_policy')::text",String.class)).isEqualTo("consent_policy");
+        createRoleUser("OWNER","consent-owner@rami.local");
+        createRoleUser("CONTENT","consent-content@rami.local");
+        String ownerCookie="__Host-rami_admin_session="+authSessionService.login("consent-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_consent_owner")).rawToken();
+        String contentCookie="__Host-rami_admin_session="+authSessionService.login("consent-content@rami.local",TEMPORARY_PASSWORD,null,metadata("req_consent_content")).rawToken();
+        HttpResponse<String> policies=http("GET","/api/admin/consent-policies",ownerCookie,null,null);
+        assertThat(policies.statusCode()).as(policies.body()).isEqualTo(200);
+        assertThat(http("GET","/api/admin/consent-policies",ownerCookie,null,null).headers().firstValue("cache-control").orElseThrow()).contains("no-store");
+        assertThat(http("GET","/api/admin/consent-policies",contentCookie,null,null).statusCode()).isEqualTo(403);
+        assertThat(http("GET","/api/admin/consent-policies",null,null,null).statusCode()).isEqualTo(401);
+        assertThat(httpWithIdempotency("POST","/api/admin/consent-policies/OPTIONAL_NOTIFICATION/draft",contentCookie,"{}").statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void consentPolicyDraftUpdateAndPublishPreserveRevisionState() throws Exception {
+        createRoleUser("OWNER","consent-policy-owner@rami.local");
+        String cookie="__Host-rami_admin_session="+authSessionService.login("consent-policy-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_consent_policy_owner")).rawToken();
+        String draftBody="{\"title\":\"선택 안내 수신 동의\",\"body\":\"선택 안내 수신에 동의합니다.\",\"required\":false,\"valid_days\":365,\"evidence_required\":false}";
+        HttpResponse<String> draft=httpWithIdempotency("POST","/api/admin/consent-policies/OPTIONAL_NOTIFICATION/draft",cookie,draftBody);
+        assertThat(draft.statusCode()).isEqualTo(201);
+        String id=jdbcTemplate.queryForObject("select id::text from consent_policy where type='OPTIONAL_NOTIFICATION' and status='DRAFT'",String.class);
+        String updateBody="{\"title\":\"선택 안내 수신 동의 v2\",\"body\":\"선택 안내 수신에 동의합니다.\",\"required\":false,\"valid_days\":365,\"evidence_required\":false,\"version\":0}";
+        assertThat(http("PUT","/api/admin/consent-policies/draft/"+id,cookie,"http://localhost:3000",updateBody).statusCode()).isEqualTo(200);
+        assertThat(http("POST","/api/admin/consent-policies/draft/"+id+"/publish",cookie,"http://localhost:3000","{\"version\":1}").statusCode()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForMap("select status,title,revision from consent_policy where id=?::uuid",id))
+                .containsEntry("status","PUBLISHED").containsEntry("title","선택 안내 수신 동의 v2").containsEntry("revision",1);
+        assertThat(http("GET","/api/admin/consent-policies?type=OPTIONAL_NOTIFICATION",cookie,null,null).body()).contains("PUBLISHED");
+    }
+
+    @Test
+    void consentCollectionAndRevocationAreVersionedAndHideChoices() throws Exception {
+        createRoleUser("OWNER","consent-flow-owner@rami.local");
+        String cookie="__Host-rami_admin_session="+authSessionService.login("consent-flow-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_consent_flow_owner")).rawToken();
+        UUID actor=jdbcTemplate.queryForObject("select id from admin_user where email='consent-flow-owner@rami.local'",UUID.class);
+        UUID student=UUID.randomUUID(),guardian=UUID.randomUUID();
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,status,joined_at,created_by,updated_by) values(?, '동의 검증 원생','consentstudent','ACTIVE',current_date,?,?)",student,actor,actor);
+        jdbcTemplate.update("insert into guardian_contact(id,student_id,name,relationship,phone_ciphertext,phone_hash,phone_last4,primary_contact) values(?,?, '보호자','MOTHER',decode('01','hex'),repeat('a',64),'1234',true)",guardian,student);
+        HttpResponse<String> policy=httpWithIdempotency("POST","/api/admin/consent-policies/OPTIONAL_NOTIFICATION/draft",cookie,
+                "{\"title\":\"선택 안내\",\"body\":\"선택 안내 수신에 동의합니다.\",\"required\":false,\"valid_days\":30,\"evidence_required\":false}");
+        assertThat(policy.statusCode()).isEqualTo(201);
+        String policyId=jdbcTemplate.queryForObject("select id::text from consent_policy where type='OPTIONAL_NOTIFICATION' and status='DRAFT'",String.class);
+        assertThat(http("POST","/api/admin/consent-policies/draft/"+policyId+"/publish",cookie,"http://localhost:3000","{\"version\":0}").statusCode()).isEqualTo(200);
+        String payload="{\"policyId\":\""+policyId+"\",\"guardianContactId\":\""+guardian+"\",\"method\":\"DIGITAL\"}";
+        HttpResponse<String> collected=httpWithIdempotency("POST","/api/admin/students/"+student+"/consents",cookie,payload);
+        assertThat(collected.statusCode()).as(collected.body()).isEqualTo(201);
+        UUID consent=UUID.fromString(jdbcTemplate.queryForObject("select id::text from student_consent where student_id=?",String.class,student));
+        assertThat(http("GET","/api/admin/students/"+student+"/consents",cookie,null,null).body()).contains("ACTIVE","queuedOptionalNotificationCount");
+        assertThat(httpWithIdempotency("POST","/api/admin/student-consents/"+consent+"/revocation",cookie,"{\"version\":0,\"reason\":\"보호자 요청\"}").statusCode()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select status from student_consent where id=?",String.class,consent)).isEqualTo("REVOKED");
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")

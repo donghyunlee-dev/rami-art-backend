@@ -11,6 +11,6 @@ public class FinancialImportRecoveryJob {
     private static final Logger LOG=LoggerFactory.getLogger(FinancialImportRecoveryJob.class);
     private final FinancialImportService service;
     public FinancialImportRecoveryJob(FinancialImportService service){this.service=service;}
-    @Scheduled(fixedDelayString="${admin.financial-import.recovery-delay-ms:60000}")
+    @Scheduled(fixedDelayString="${admin.financial-import.recovery-delay-ms:60000}",initialDelayString="${admin.financial-import.recovery-initial-delay-ms:10000}")
     public void recover(){try{service.recoverConfirmations();}catch(RuntimeException e){LOG.error("Financial import recovery failed");}}
 }
