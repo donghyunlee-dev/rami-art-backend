@@ -885,6 +885,57 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void auditLogOptionsListAndDetailAreOwnerOnlyAndNeverCached() throws Exception {
+        createRoleUser("OWNER", "audit-reader@rami.local");
+        createRoleUser("OPERATOR", "audit-denied@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "audit-reader@rami.local", TEMPORARY_PASSWORD, null, metadata("req_audit_owner_login")).rawToken();
+        String operatorCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "audit-denied@rami.local", TEMPORARY_PASSWORD, null, metadata("req_audit_operator_login")).rawToken();
+
+        HttpResponse<String> anonymous = http("GET", "/api/admin/audit-log-options", null, null, null);
+        HttpResponse<String> denied = http("GET", "/api/admin/audit-logs?size=20", operatorCookie, null, null);
+        HttpResponse<String> options = http("GET", "/api/admin/audit-log-options", ownerCookie, null, null);
+        HttpResponse<String> list = http("GET", "/api/admin/audit-logs?size=20", ownerCookie, null, null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(denied.statusCode()).isEqualTo(403);
+        assertThat(options.statusCode()).as(options.body()).isEqualTo(200);
+        assertThat(options.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(list.statusCode()).as(list.body()).isEqualTo(200);
+        assertThat(list.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(list.body()).contains("\"items\":", "\"page\":{\"size\":20,\"nextCursor\":", "actionLabel")
+                .doesNotContain("details", "ip_address", "user_agent");
+        String id = java.util.regex.Pattern.compile("\\\"id\\\":\\\"([0-9a-f-]{36})\\\"")
+                .matcher(list.body()).results().findFirst().orElseThrow().group(1);
+        HttpResponse<String> detail = http("GET", "/api/admin/audit-logs/" + id, ownerCookie, null, null);
+        assertThat(detail.statusCode()).as(detail.body()).isEqualTo(200);
+        assertThat(detail.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(detail.body()).contains("occurredAt", "requestId", "actor", "actionLabel", "details");
+    }
+
+    @Test
+    void adminUserListRequiresReadPermissionAndReturnsPagedNoStoreSummaries() throws Exception {
+        createRoleUser("OWNER", "account-owner@rami.local");
+        createRoleUser("OPERATOR", "account-operator@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "account-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_admin_users_owner")).rawToken();
+        String operatorCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "account-operator@rami.local", TEMPORARY_PASSWORD, null, metadata("req_admin_users_operator")).rawToken();
+
+        HttpResponse<String> anonymous = http("GET", "/api/admin/users", null, null, null);
+        HttpResponse<String> denied = http("GET", "/api/admin/users", operatorCookie, null, null);
+        HttpResponse<String> listed = http("GET", "/api/admin/users?size=20&sort=displayName,asc", ownerCookie, null, null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(denied.statusCode()).isEqualTo(403);
+        assertThat(listed.statusCode()).as(listed.body()).isEqualTo(200);
+        assertThat(listed.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(listed.body()).contains("account-owner@rami.local", "account-operator@rami.local")
+                .contains("totalElements", "passwordMustChange", "actions");
+    }
+
+    @Test
     void dataTransferRejectsAnActiveFileHashDuplicateBeforeStorageUpload() throws Exception {
         createRoleUser("OPERATOR", "data-transfer-duplicate@rami.local");
         String cookie = "__Host-rami_admin_session=" + authSessionService.login(

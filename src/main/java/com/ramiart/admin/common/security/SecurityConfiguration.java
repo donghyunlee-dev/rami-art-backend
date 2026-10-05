@@ -58,6 +58,11 @@ public class SecurityConfiguration {
                                 .authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/admin/session-policies")
                                 .hasAuthority("SECURITY_POLICY_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/audit-log-options", "/api/admin/audit-logs",
+                                "/api/admin/audit-logs/*")
+                                .hasAuthority("AUDIT_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/users")
+                                .hasAuthority("ADMIN_ACCOUNT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/session-policies")
                                 .hasAuthority("SECURITY_POLICY_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/data-transfer/templates/*")
