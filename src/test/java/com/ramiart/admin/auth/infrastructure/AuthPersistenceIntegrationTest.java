@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -349,6 +350,49 @@ class AuthPersistenceIntegrationTest {
         assertThat(http("GET","/api/admin/students/"+student+"/consents",cookie,null,null).body()).contains("ACTIVE","queuedOptionalNotificationCount");
         assertThat(httpWithIdempotency("POST","/api/admin/student-consents/"+consent+"/revocation",cookie,"{\"version\":0,\"reason\":\"보호자 요청\"}").statusCode()).isEqualTo(200);
         assertThat(jdbcTemplate.queryForObject("select status from student_consent where id=?",String.class,consent)).isEqualTo("REVOKED");
+    }
+
+    @Test
+    void notificationRoutesRequirePermissionsAndManualQueueStoresEncryptedSnapshot() throws Exception {
+        assertThat(jdbcTemplate.queryForObject("select to_regclass('public.notification_message')::text",String.class)).isEqualTo("notification_message");
+        createRoleUser("OWNER","notification-owner@rami.local");
+        createRoleUser("CONTENT","notification-content@rami.local");
+        String ownerCookie="__Host-rami_admin_session="+authSessionService.login("notification-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_notification_owner")).rawToken();
+        String contentCookie="__Host-rami_admin_session="+authSessionService.login("notification-content@rami.local",TEMPORARY_PASSWORD,null,metadata("req_notification_content")).rawToken();
+        assertThat(http("GET","/api/admin/notifications",ownerCookie,null,null).statusCode()).isEqualTo(200);
+        assertThat(http("GET","/api/admin/notifications",ownerCookie,null,null).headers().firstValue("cache-control").orElseThrow()).contains("no-store");
+        assertThat(http("GET","/api/admin/notifications",contentCookie,null,null).statusCode()).isEqualTo(403);
+        assertThat(http("GET","/api/admin/notifications",null,null,null).statusCode()).isEqualTo(401);
+        String unsupported="{\"type\":\"GENERAL\",\"channel\":\"SMS\",\"recipientFilter\":{},\"bodyTemplate\":\"안내\",\"scheduledAt\":\""+OffsetDateTime.now().plusMinutes(5).withNano(0)+"\"}";
+        assertThat(http("POST","/api/admin/notifications/preview",ownerCookie,"http://localhost:3000",unsupported).statusCode()).isEqualTo(422);
+        assertThat(http("POST","/api/admin/notifications/preview",contentCookie,"http://localhost:3000",unsupported).statusCode()).isEqualTo(403);
+
+        UUID actor=jdbcTemplate.queryForObject("select id from admin_user where email='notification-owner@rami.local'",UUID.class);
+        UUID student=UUID.randomUUID(),guardian=UUID.randomUUID();
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,status,joined_at,created_by,updated_by) values(?, '알림 통합시험 원생','notificationstudent','ACTIVE',current_date,?,?)",student,actor,actor);
+        jdbcTemplate.update("insert into guardian_contact(id,student_id,name,relationship,phone_ciphertext,phone_hash,phone_last4,primary_contact) values(?,?, '보호자','MOTHER',decode('01','hex'),repeat('b',64),'9876',true)",guardian,student);
+        String scheduled=OffsetDateTime.now().plusMinutes(10).withNano(0).toString();
+        String draft="{\"type\":\"GENERAL\",\"channel\":\"MANUAL\",\"recipientFilter\":{\"studentIds\":[\""+student+"\"],\"classGroupIds\":[]},\"bodyTemplate\":\"{{studentName}}님 안내\",\"variables\":{},\"scheduledAt\":\""+scheduled+"\",\"optionalNotice\":false}";
+        HttpResponse<String> preview=http("POST","/api/admin/notifications/preview",ownerCookie,"http://localhost:3000",draft);
+        assertThat(preview.statusCode()).as(preview.body()).isEqualTo(200);
+        assertThat(preview.body()).contains("\"eligibleCount\":1","알••••");
+        String token=new com.fasterxml.jackson.databind.ObjectMapper().readTree(preview.body()).path("data").path("previewToken").asText();
+        String queued=draft.substring(0,draft.length()-1)+",\"previewToken\":\""+token+"\"}";
+        UUID key=UUID.randomUUID();HttpResponse<String> result=httpWithKey("POST","/api/admin/notifications",ownerCookie,queued,key);
+        assertThat(result.statusCode()).as(result.body()).isEqualTo(201);
+        UUID batch=UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.body()).path("data").path("batchKey").asText());
+        assertThat(jdbcTemplate.queryForObject("select count(*) from notification_message where batch_key=? and status='QUEUED'",Integer.class,batch)).isOne();
+        byte[] ciphertext=jdbcTemplate.queryForObject("select body_ciphertext from notification_message where batch_key=?",byte[].class,batch);
+        assertThat(new String(ciphertext,java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("알림 통합시험 원생");
+        assertThat(httpWithKey("POST","/api/admin/notifications",ownerCookie,queued,key).body()).contains(batch.toString());
+        UUID message=jdbcTemplate.queryForObject("select id from notification_message where batch_key=?",UUID.class,batch);
+        jdbcTemplate.update("update notification_message set status='FAILED',attempt_count=1,last_error_code='PROVIDER_TEMPORARY',version=version+1 where id=?",message);
+        UUID retryKey=UUID.randomUUID();HttpResponse<String> retry=httpWithKey("POST","/api/admin/notifications/"+message+"/retry",ownerCookie,"",retryKey);
+        assertThat(retry.statusCode()).as(retry.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select status from notification_message where id=?",String.class,message)).isEqualTo("QUEUED");
+        assertThat(httpWithKey("POST","/api/admin/notifications/"+message+"/retry",ownerCookie,"",retryKey).body()).contains("QUEUED");
+        assertThat(http("POST","/api/admin/notifications/"+message+"/cancellation",ownerCookie,"http://localhost:3000","{\"version\":2,\"reason\":\"발송 내용 변경\"}").statusCode()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select status from notification_message where id=?",String.class,message)).isEqualTo("CANCELLED");
     }
 
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)

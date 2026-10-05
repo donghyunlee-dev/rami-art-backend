@@ -78,6 +78,13 @@ public class SecurityConfiguration {
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/consent-policies/draft/*")
                                 .hasAuthority("CONSENT_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/notifications", "/api/admin/notifications/*")
+                                .hasAuthority("NOTIFICATION_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/notifications/preview")
+                                .hasAuthority("NOTIFICATION_SEND")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/notifications",
+                                "/api/admin/notifications/*/cancellation", "/api/admin/notifications/*/retry")
+                                .hasAuthority("NOTIFICATION_SEND")
                         .requestMatchers(HttpMethod.POST, "/api/admin/financial-entries",
                                 "/api/admin/financial-entries/*/cancellations")
                                 .hasAuthority("FINANCE_WRITE")
