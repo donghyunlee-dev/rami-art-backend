@@ -33,6 +33,14 @@ public class StudentService {
         return repository.findStudents(k,ss,from,to,birthdayFrom,birthdayTo,page,size,sort);
     }
     @Transactional(readOnly=true) public StudentDetail detail(UUID id){return toDetail(record(id));}
+    @Transactional(readOnly=true)
+    public List<StudentSummary> duplicateCandidates(StudentCreate raw) {
+        StudentCreate command=normalize(raw);
+        validate(command.studentName(),command.birthday(),command.schoolName(),command.joinedAt(),command.guardians());
+        List<StoredGuardian> guardians=protect(command.guardians(),null);
+        return repository.findDuplicateCandidates(search(command.studentName()),command.birthday(),
+                guardians.stream().map(StoredGuardian::phoneHash).toList());
+    }
     @Transactional
     public StudentDetail create(StudentCreate raw,UUID actor,UUID key,RequestMetadata meta){
         StudentCreate c=normalize(raw); validate(c.studentName(),c.birthday(),c.schoolName(),c.joinedAt(),c.guardians());

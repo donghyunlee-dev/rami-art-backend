@@ -3,10 +3,14 @@ package com.ramiart.admin.datatransfer.application;
 import static com.ramiart.admin.datatransfer.application.DataTransferModels.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ramiart.admin.auth.application.AuditRecorder;
+import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.student.application.StudentException;
 import com.ramiart.admin.inquiry.application.InquiryDataProtector;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -20,6 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -32,13 +37,20 @@ public class DataTransferService {
     private final ObjectMapper mapper;
     private final DataTransferStorage storage;
     private final InquiryDataProtector protector;
+    private final DataTransferStudentWorker studentWorker;
+    private final AuditRecorder audit;
+    private final JdbcClient jdbc;
 
     public DataTransferService(DataTransferRepository repository, ObjectMapper mapper,
-            DataTransferStorage storage, InquiryDataProtector protector) {
+            DataTransferStorage storage, InquiryDataProtector protector, DataTransferStudentWorker studentWorker,
+            AuditRecorder audit, JdbcClient jdbc) {
         this.repository = repository;
         this.mapper = mapper;
         this.storage = storage;
         this.protector = protector;
+        this.studentWorker = studentWorker;
+        this.audit = audit;
+        this.jdbc = jdbc;
     }
 
     public Template template(String domain, Authentication authentication) {
@@ -87,8 +99,9 @@ public class DataTransferService {
             List<ImportedRow> rows = importRows(id, normalized, headers, csv.subList(1, csv.size()));
             repository.insertRows(id, rows);
             int valid = (int) rows.stream().filter(row -> "VALID".equals(row.status())).count();
-            int invalid = rows.size() - valid;
-            repository.markImportReady(id, rows.size(), valid, invalid, 0);
+            int invalid = (int) rows.stream().filter(row -> "INVALID".equals(row.status())).count();
+            int duplicates = (int) rows.stream().filter(row -> "DUPLICATE".equals(row.status())).count();
+            repository.markImportReady(id, rows.size(), valid, invalid, duplicates);
             return job(id, authentication);
         } catch (DataIntegrityViolationException exception) {
             if (uploaded) storage.delete(key);
@@ -117,12 +130,17 @@ public class DataTransferService {
             String dedup = protector.hash("data-transfer:v1:" + domain + ":" + canonical);
             if (!seen.add(dedup)) errors.add(new FieldError("row", "DUPLICATE_IN_FILE"));
             String status = errors.isEmpty() ? "VALID" : "INVALID";
+            UUID duplicateTargetId = null;
+            if ("VALID".equals(status) && "STUDENT".equals(domain)) {
+                duplicateTargetId = studentWorker.duplicateCandidate(payload);
+                if (duplicateTargetId != null) status = "DUPLICATE";
+            }
             String errorJson;
             try { errorJson = mapper.writeValueAsString(errors); }
             catch (Exception exception) { throw new DataTransferException("TRANSFER_IMPORT_FAILED"); }
             String summary = domainLabel(domain) + " · " + (index + 1) + "행";
             rows.add(new ImportedRow(UUID.randomUUID(), index + 1, status, protector.protect(canonical), dedup,
-                    summary, errorJson, null, null));
+                    summary, errorJson, duplicateTargetId, null));
         }
         return List.copyOf(rows);
     }
@@ -133,13 +151,17 @@ public class DataTransferService {
                 required(row, "studentName", 100, errors);
                 required(row, "guardianName", 100, errors);
                 required(row, "guardianPhone", 30, errors);
-                if (!Set.of("MOTHER", "FATHER", "GRANDPARENT", "GUARDIAN", "OTHER").contains(row.get("relationship")))
+                if (!Set.of("MOTHER", "FATHER", "GRANDPARENT", "GUARDIAN").contains(row.get("relationship")))
                     errors.add(new FieldError("relationship", "INVALID_VALUE"));
                 if (row.get("guardianEmail") != null && !row.get("guardianEmail").isBlank()
                         && !row.get("guardianEmail").matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))
                     errors.add(new FieldError("guardianEmail", "INVALID_VALUE"));
                 date(row, "birthday", errors);
+                required(row, "joinedAt", 10, errors);
                 date(row, "joinedAt", errors);
+                for (String field : List.of("courseCode", "classGroupCode"))
+                    if (row.get(field) != null && !row.get(field).isBlank())
+                        errors.add(new FieldError(field, "NOT_SUPPORTED_FOR_IMPORT"));
             }
             case "PAYMENT" -> {
                 if (!uuid(row.get("billingId")) && !uuid(row.get("studentId"))) errors.add(new FieldError("billingId", "TARGET_REQUIRED"));
@@ -192,6 +214,141 @@ public class DataTransferService {
         catch (java.security.NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }
 
+    @Transactional
+    public ConfirmResponse confirm(UUID jobId, ConfirmRequest request, UUID idempotencyKey,
+            RequestMetadata metadata, Authentication authentication) {
+        UUID actor = require(authentication, "DATA_TRANSFER_IMPORT");
+        require(authentication, "STUDENT_WRITE");
+        validateConfirm(request, idempotencyKey);
+        String scope = "DATA_TRANSFER_CONFIRM:" + actor + ":" + jobId;
+        String requestHash = protector.hash(canonicalConfirm(request));
+        int claimed = jdbc.sql("""
+                insert into idempotency_record(scope,idempotency_key,request_hash,state,expires_at)
+                values(:scope,:key,:hash,'PROCESSING',statement_timestamp()+interval '24 hours')
+                on conflict(scope,idempotency_key) do nothing
+                """).param("scope", scope).param("key", idempotencyKey).param("hash", requestHash).update();
+        if (claimed == 0) {
+            Object[] prior = jdbc.sql("select request_hash,state,encrypted_response from idempotency_record where scope=:scope and idempotency_key=:key")
+                    .param("scope", scope).param("key", idempotencyKey)
+                    .query((row, index) -> new Object[] {row.getString(1), row.getString(2), row.getBytes(3)}).single();
+            if (!requestHash.equals(prior[0])) throw new DataTransferException("IDEMPOTENCY_KEY_REUSED");
+            if (!"COMPLETED".equals(prior[1]) || prior[2] == null)
+                throw new DataTransferException("IDEMPOTENCY_IN_PROGRESS");
+            return new ConfirmResponse(job(jobId, authentication), deserializeResults(protector.reveal((byte[]) prior[2])));
+        }
+
+        ConfirmJob job = repository.lockConfirmJob(jobId, actor)
+                .orElseThrow(() -> new DataTransferException("TRANSFER_JOB_NOT_FOUND"));
+        if (job.version() != request.jobVersion()) throw new DataTransferException("TRANSFER_JOB_VERSION_CONFLICT");
+        if (!"STUDENT".equals(job.domain())) throw new DataTransferException("TRANSFER_DOMAIN_NOT_SUPPORTED");
+        if (!List.of("READY", "PROCESSING", "PARTIAL").contains(job.status()))
+            throw new DataTransferException("TRANSFER_ROW_NOT_CONFIRMABLE");
+        List<ConfirmRow> rows = repository.lockConfirmRows(jobId, request.rowIds());
+        if (rows.size() != request.rowIds().size()) throw new DataTransferException("TRANSFER_ROW_NOT_CONFIRMABLE");
+
+        int confirmedDelta = 0;
+        int failedDelta = 0;
+        int duplicateDelta = 0;
+        int validDelta = 0;
+        int changed = 0;
+        List<ConfirmResult> results = new ArrayList<>();
+        for (ConfirmRow row : rows) {
+            String duplicateAction = request.duplicateActions().get(row.id());
+            if (duplicateAction != null && !"DUPLICATE".equals(row.status()))
+                throw new DataTransferException("TRANSFER_ROW_NOT_CONFIRMABLE");
+            if ("DUPLICATE".equals(row.status()) && "SKIP".equals(duplicateAction)) {
+                results.add(new ConfirmResult(row.id(), "DUPLICATE", null, null));
+                continue;
+            }
+            if (row.payloadCiphertext() == null) throw new DataTransferException("TRANSFER_ROW_NOT_CONFIRMABLE");
+            Map<String, String> payload = decryptRow(row.payloadCiphertext());
+            UUID rowKey = UUID.nameUUIDFromBytes((jobId + ":" + row.id()).getBytes(StandardCharsets.UTF_8));
+            try {
+                UUID target = studentWorker.create(payload, actor, rowKey, metadata,
+                        "DUPLICATE".equals(row.status()) && "CREATE_NEW".equals(duplicateAction));
+                repository.markRowConfirmed(row.id(), target);
+                confirmedDelta++;
+                if ("FAILED".equals(row.status())) failedDelta--;
+                if ("DUPLICATE".equals(row.status())) { duplicateDelta--; validDelta++; }
+                changed++;
+                results.add(new ConfirmResult(row.id(), "CONFIRMED", target, null));
+            } catch (StudentException exception) {
+                if ("STUDENT_DUPLICATE_CANDIDATE".equals(exception.code()) && !"CREATE_NEW".equals(duplicateAction)) {
+                    UUID candidate = firstDuplicateCandidate(exception);
+                    if (candidate == null) {
+                        repository.markRowFailed(row.id(), "STUDENT_IMPORT_REJECTED");
+                        if ("VALID".equals(row.status())) failedDelta++;
+                        if ("DUPLICATE".equals(row.status())) { duplicateDelta--; validDelta++; failedDelta++; }
+                        results.add(new ConfirmResult(row.id(), "FAILED", null, "STUDENT_IMPORT_REJECTED"));
+                    } else {
+                        repository.markRowDuplicate(row.id(), candidate);
+                        if ("VALID".equals(row.status())) { duplicateDelta++; validDelta--; }
+                        if ("FAILED".equals(row.status())) { failedDelta--; duplicateDelta++; validDelta--; }
+                        results.add(new ConfirmResult(row.id(), "DUPLICATE", null, null));
+                    }
+                    changed++;
+                } else {
+                    repository.markRowFailed(row.id(), "STUDENT_IMPORT_REJECTED");
+                    if ("VALID".equals(row.status())) failedDelta++;
+                    if ("DUPLICATE".equals(row.status())) { duplicateDelta--; validDelta++; failedDelta++; }
+                    changed++;
+                    results.add(new ConfirmResult(row.id(), "FAILED", null, "STUDENT_IMPORT_REJECTED"));
+                }
+            }
+        }
+        if (changed > 0 && !repository.finishConfirmation(jobId, job.version(), confirmedDelta,
+                failedDelta, duplicateDelta, validDelta)) throw new DataTransferException("TRANSFER_JOB_VERSION_CONFLICT");
+        if (changed > 0) audit.record(new Event(Instant.now(), metadata.requestId(), "MGT-DATA-TRANSFER", "OPERATION",
+                "ADMIN", actor, null, "DATA_TRANSFER_ROWS_CONFIRMED", "DATA_TRANSFER_JOB", jobId, "SUCCESS", null,
+                metadata.ipAddress(), metadata.userAgent(), Map.of("confirmedCount", confirmedDelta,
+                        "failedCount", failedDelta, "duplicateCount", duplicateDelta)));
+        ConfirmResponse response = new ConfirmResponse(job(jobId, authentication), List.copyOf(results));
+        try {
+            jdbc.sql("""
+                    update idempotency_record set state='COMPLETED',resource_id=:job,response_status=200,
+                        encrypted_response=:response where scope=:scope and idempotency_key=:key
+                    """).param("job", jobId).param("response", protector.protect(mapper.writeValueAsString(results)))
+                    .param("scope", scope).param("key", idempotencyKey).update();
+        } catch (Exception exception) { throw new DataTransferException("TRANSFER_CONFIRM_FAILED"); }
+        return response;
+    }
+
+    private static void validateConfirm(ConfirmRequest request, UUID key) {
+        if (request == null || request.jobVersion() < 0 || key == null || request.rowIds() == null
+                || request.rowIds().isEmpty() || request.rowIds().size() > 500
+                || request.rowIds().stream().distinct().count() != request.rowIds().size()
+                || request.duplicateActions() == null
+                || !request.rowIds().containsAll(request.duplicateActions().keySet())
+                || request.duplicateActions().values().stream().anyMatch(action -> !Set.of("CREATE_NEW", "SKIP").contains(action)))
+            throw new DataTransferException("VALIDATION_ERROR");
+    }
+
+    private static String canonicalConfirm(ConfirmRequest request) {
+        return request.jobVersion() + "|" + request.rowIds().stream().sorted().map(UUID::toString)
+                .collect(java.util.stream.Collectors.joining(",")) + "|" + request.duplicateActions().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey()).map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private Map<String, String> decryptRow(byte[] ciphertext) {
+        try { return mapper.readValue(protector.reveal(ciphertext), new TypeReference<>() {}); }
+        catch (Exception exception) { throw new DataTransferException("TRANSFER_ROW_NOT_CONFIRMABLE"); }
+    }
+
+    private static UUID firstDuplicateCandidate(StudentException exception) {
+        Object candidates = exception.details().get("candidates");
+        if (candidates instanceof List<?> list && !list.isEmpty() && list.getFirst() instanceof Map<?, ?> map) {
+            Object id = map.get("id");
+            try { return UUID.fromString(String.valueOf(id)); } catch (RuntimeException ignored) { return null; }
+        }
+        return null;
+    }
+
+    private List<ConfirmResult> deserializeResults(String value) {
+        try { return mapper.readValue(value, new TypeReference<>() {}); }
+        catch (Exception exception) { throw new DataTransferException("TRANSFER_CONFIRM_FAILED"); }
+    }
+
     public Job job(UUID id, Authentication authentication) {
         UUID actor = requireAny(authentication);
         JobRecord record = repository.findJob(id, actor)
@@ -233,7 +390,7 @@ public class DataTransferService {
             List<FieldError> errors = mapper.readValue(record.fieldErrorsJson(), new TypeReference<>() {});
             DuplicateCandidate duplicate = record.duplicateTargetId() == null ? null
                     : new DuplicateCandidate(record.duplicateTargetId(), "등록된 데이터");
-            return new Row(record.rowNumber(), record.status(), record.maskedSummary(), errors, duplicate,
+            return new Row(record.id(), record.rowNumber(), record.status(), record.maskedSummary(), errors, duplicate,
                     record.resultTargetId(), record.errorCode());
         } catch (Exception exception) {
             throw new DataTransferException("TRANSFER_JOB_READ_FAILED");
@@ -257,6 +414,8 @@ public class DataTransferService {
     }
 
     public record Template(String version, String csv) {}
+    public record ConfirmRequest(int jobVersion, List<UUID> rowIds, Map<UUID, String> duplicateActions) {}
+    public record RequestMetadata(String requestId, String ipAddress, String userAgent) {}
 
     public static final class DataTransferException extends RuntimeException {
         private final String code;

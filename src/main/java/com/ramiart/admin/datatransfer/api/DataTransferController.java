@@ -3,6 +3,9 @@ package com.ramiart.admin.datatransfer.api;
 import com.ramiart.admin.datatransfer.application.DataTransferService;
 import com.ramiart.admin.datatransfer.application.DataTransferModels.Job;
 import com.ramiart.admin.datatransfer.application.DataTransferModels.RowPage;
+import com.ramiart.admin.datatransfer.application.DataTransferModels.ConfirmResponse;
+import com.ramiart.admin.datatransfer.application.DataTransferService.ConfirmRequest;
+import com.ramiart.admin.datatransfer.application.DataTransferService.RequestMetadata;
 import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,9 +22,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.HttpStatus;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/data-transfer")
@@ -63,6 +69,17 @@ public final class DataTransferController {
             @RequestParam(defaultValue = "50") int size,
             Authentication authentication, HttpServletRequest request) {
         return ok(service.rows(id, status, cursor, size, authentication), request);
+    }
+
+    @PostMapping("/jobs/{id}/confirm")
+    ResponseEntity<ApiEnvelope<ConfirmResponse>> confirm(@PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key, @RequestBody ConfirmRequest body,
+            Authentication authentication, HttpServletRequest request) {
+        String userAgent = request.getHeader(HttpHeaders.USER_AGENT);
+        if (userAgent != null) userAgent = userAgent.replaceAll("[\\p{Cntrl}]", "");
+        RequestMetadata metadata = new RequestMetadata(RequestIdFilter.get(request), request.getRemoteAddr(),
+                userAgent == null ? null : userAgent.substring(0, Math.min(512, userAgent.length())));
+        return ok(service.confirm(id, body, key, metadata, authentication), request);
     }
 
     private static <T> ResponseEntity<ApiEnvelope<T>> ok(T value, HttpServletRequest request) {

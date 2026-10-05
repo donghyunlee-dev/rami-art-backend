@@ -14,4 +14,11 @@ public interface DataTransferRepository {
             String sha256, long fileSize, UUID actor);
     void insertRows(UUID jobId, Collection<ImportedRow> rows);
     void markImportReady(UUID jobId, int total, int valid, int invalid, int duplicates);
+    Optional<ConfirmJob> lockConfirmJob(UUID jobId, UUID actor);
+    List<ConfirmRow> lockConfirmRows(UUID jobId, List<UUID> rowIds);
+    void markRowConfirmed(UUID rowId, UUID resultTargetId);
+    void markRowDuplicate(UUID rowId, UUID duplicateTargetId);
+    void markRowFailed(UUID rowId, String errorCode);
+    boolean finishConfirmation(UUID jobId, int expectedVersion, int confirmedDelta, int failedDelta,
+            int duplicateDelta, int validDelta);
 }

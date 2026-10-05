@@ -20,9 +20,11 @@ public final class DataTransferExceptionHandler {
             case "DATA_TRANSFER_READ_DENIED", "DATA_TRANSFER_IMPORT_DENIED" -> HttpStatus.FORBIDDEN;
             case "TRANSFER_JOB_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "TRANSFER_FILE_DUPLICATED" -> HttpStatus.CONFLICT;
+            case "TRANSFER_JOB_VERSION_CONFLICT", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_IN_PROGRESS" -> HttpStatus.CONFLICT;
             case "TRANSFER_FILE_EXPIRED" -> HttpStatus.GONE;
+            case "TRANSFER_ROW_NOT_CONFIRMABLE", "TRANSFER_DOMAIN_NOT_SUPPORTED" -> HttpStatus.UNPROCESSABLE_ENTITY;
             case "TRANSFER_FILE_TOO_LARGE" -> HttpStatus.PAYLOAD_TOO_LARGE;
-            case "TRANSFER_IMPORT_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "TRANSFER_IMPORT_FAILED", "TRANSFER_CONFIRM_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> exception.code().endsWith("_DENIED") ? HttpStatus.FORBIDDEN : HttpStatus.BAD_REQUEST;
         };
         return ResponseEntity.status(status).header("Cache-Control", "no-store")

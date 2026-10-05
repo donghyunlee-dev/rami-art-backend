@@ -722,6 +722,44 @@ class AuthPersistenceIntegrationTest {
         verify(dataTransferStorage).upload(org.mockito.ArgumentMatchers.startsWith("data-transfers/"), org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void dataTransferConfirmCreatesStudentAndConsumesEncryptedRowPayload() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-confirm@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-confirm@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_confirm_login")).rawToken();
+        String csv = "studentName,birthday,joinedAt,guardianName,relationship,guardianPhone,guardianEmail,courseCode,classGroupCode\r\n"
+                + "Transfer Learner,2015-05-01,2023-03-01,Transfer Guardian,MOTHER,01033334444,,,\r\n";
+        HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
+                "STUDENT", "STUDENT_V1", "confirm.csv", csv);
+        assertThat(upload.statusCode()).as(upload.body()).isEqualTo(201);
+        UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where domain='STUDENT' and source_file_name='confirm.csv'",
+                UUID.class);
+        UUID rowId = jdbcTemplate.queryForObject("select id from data_transfer_row where job_id=?", UUID.class, jobId);
+        UUID key = UUID.randomUUID();
+
+        HttpResponse<String> confirmed = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie,
+                "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}", key);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie,
+                "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}", key);
+
+        assertThat(confirmed.statusCode()).as(confirmed.body()).isEqualTo(200);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from student where student_name_search='transferlearner'", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where id=?", String.class, rowId)).isEqualTo("CONFIRMED");
+        assertThat(jdbcTemplate.queryForObject("select payload_ciphertext from data_transfer_row where id=?", byte[].class, rowId)).isNull();
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_job where id=?", String.class, jobId)).isEqualTo("COMPLETED");
+
+        String duplicateCsv = "studentName,birthday,joinedAt,guardianName,relationship,guardianPhone,guardianEmail,courseCode,classGroupCode\r\n"
+                + "Transfer Learner,2015-05-01,2023-03-01,Transfer Guardian,MOTHER,01033334444,other@example.com,,\r\n";
+        HttpResponse<String> duplicateUpload = multipart("/api/admin/data-transfer/imports", cookie,
+                "STUDENT", "STUDENT_V1", "duplicate-confirm.csv", duplicateCsv);
+        assertThat(duplicateUpload.statusCode()).as(duplicateUpload.body()).isEqualTo(201);
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='duplicate-confirm.csv')",
+                String.class)).isEqualTo("DUPLICATE");
+        assertThat(jdbcTemplate.queryForObject("select duplicate_target_id from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='duplicate-confirm.csv')",
+                UUID.class)).isEqualTo(jdbcTemplate.queryForObject("select id from student where student_name_search='transferlearner'", UUID.class));
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")
