@@ -50,7 +50,7 @@ public class JdbcConsentRepository implements ConsentRepository {
     @Override public boolean guardianBelongsTo(UUID guardianId,UUID studentId){return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from guardian_contact where id=:guardian and student_id=:student)",Map.of("guardian",guardianId,"student",studentId),Boolean.class));}
     @Override public List<ConsentTypeStatus> studentConsents(UUID studentId){
         boolean galleryAvailable=galleryTableAvailable();
-        String galleryJoin=galleryAvailable?"left join lateral(select count(*) artwork_count from gallery_artwork a where a.student_consent_id=c.id and a.status='PUBLISHED' and a.visible)g on true":"";
+        String galleryJoin=galleryAvailable?"left join lateral(select count(*) artwork_count from gallery_artwork a where a.student_consent_id=c.id and a.status='PUBLISHED' and a.visible and c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date))g on true":"";
         String notificationJoin=notificationTableAvailable()?"left join lateral(select count(*) notification_count from notification_message m where m.consent_id=c.id and m.optional_notice and m.status='QUEUED')n on true":"";
         String artworkCount=galleryAvailable?"coalesce(g.artwork_count,0)":"0";
         String notificationCount=notificationTableAvailable()?"coalesce(n.notification_count,0)":"0";
@@ -93,7 +93,8 @@ public class JdbcConsentRepository implements ConsentRepository {
     @Override public boolean revoke(UUID id,long version,String reason,UUID actor){
         int changed=jdbc.update("update student_consent set status='REVOKED',revoked_at=statement_timestamp(),revoked_by=:actor,revoke_reason=:reason,version=version+1 where id=:id and version=:version and status='ACTIVE'",Map.of("id",id,"version",version,"reason",reason,"actor",actor));
         if(changed!=1)return false;
-        jdbc.update("update gallery_artwork set visible=false,featured=false,featured_order=null,version=version+1 where student_consent_id=:id and status='PUBLISHED' and visible",Map.of("id",id));
+        // Published gallery revisions are immutable. Public reads re-check consent status and expiry,
+        // so revocation removes them from public results without mutating historical content.
         jdbc.update("update notification_message set status='CANCELLED',cancelled_at=statement_timestamp(),cancelled_by=:actor,cancel_reason='동의 철회로 자동 취소',version=version+1 where consent_id=:id and optional_notice and status='QUEUED'",Map.of("id",id,"actor",actor));
         return true;
     }

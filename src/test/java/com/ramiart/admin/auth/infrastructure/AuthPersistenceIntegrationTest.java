@@ -524,6 +524,54 @@ class AuthPersistenceIntegrationTest {
         assertThat(publicRead.body()).contains("색과 형태", "작품 이미지", "ART_HTTP").doesNotContain("DRAFT", "mediaAssetId", "version");
     }
 
+    @Test
+    void galleryArtworkPublicationRequiresActiveConsentAndRevocationHidesImmutableRevision() throws Exception {
+        createRoleUser("OWNER", "gallery-owner@rami.local");
+        createRoleUser("OPERATOR", "gallery-operator@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "gallery-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_gallery_owner")).rawToken();
+        String operator = "__Host-rami_admin_session=" + authSessionService.login(
+                "gallery-operator@rami.local", TEMPORARY_PASSWORD, null, metadata("req_gallery_operator")).rawToken();
+        assertThat(http("GET", "/api/admin/gallery-artworks?page=0&size=20", operator, null, null).statusCode()).isEqualTo(403);
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email='gallery-owner@rami.local'", UUID.class);
+        UUID course = UUID.randomUUID(), student = UUID.randomUUID(), guardian = UUID.randomUUID(), policy = UUID.randomUUID(), consent = UUID.randomUUID();
+        jdbcTemplate.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,?,0,true,?,?)",course,"ART_GAL","갤러리 과정",actor,actor);
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,status,joined_at,created_by,updated_by) values(?, '김가람','김가람','ACTIVE',current_date,?,?)",student,actor,actor);
+        jdbcTemplate.update("insert into guardian_contact(id,student_id,name,relationship,phone_ciphertext,phone_hash,phone_last4,primary_contact) values(?,?, '보호자','MOTHER',decode('01','hex'),repeat('b',64),'5678',true)",guardian,student);
+        jdbcTemplate.update("insert into consent_policy(id,type,revision,status,title,body,required,valid_days,evidence_required,version,created_by,published_by,published_at) values(?,'MEDIA_PUBLICATION',1,'PUBLISHED','작품 공개 동의','작품 공개를 동의합니다.',false,null,false,1,?,?,statement_timestamp())",policy,actor,actor);
+        jdbcTemplate.update("insert into student_consent(id,student_id,consent_policy_id,policy_type,guardian_contact_id,method,status,consented_at,created_by) values(?,?,?,'MEDIA_PUBLICATION',?,'DIGITAL','ACTIVE',statement_timestamp(),?)",consent,student,policy,guardian,actor);
+        UUID asset = jdbcTemplate.queryForObject("select id from media_asset where storage_key='seed/generic-brand-share.png'", UUID.class);
+        String createBody = "{\"title\":\"푸른 물결\",\"courseId\":\""+course+"\",\"audienceLabel\":\"초등\",\"medium\":\"수채화\",\"description\":\"색의 흐름을 탐색한 작품입니다.\",\"mediaAssetId\":\""+asset+"\",\"altText\":\"푸른색 수채화 작품\",\"studentConsentId\":\""+consent+"\",\"consentExemptionReason\":null,\"visible\":true,\"featured\":false,\"featuredOrder\":null}";
+        UUID createKey = UUID.randomUUID();
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/gallery-artworks", cookie, createBody, createKey);
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body());
+        UUID artwork = UUID.fromString(json.path("data").path("artworkId").asText());
+        UUID draft = UUID.fromString(json.path("data").path("draft").path("id").asText());
+        String publishBody="{\"draftId\":\""+draft+"\",\"draftVersion\":0}";
+        UUID publishKey=UUID.randomUUID();
+        HttpResponse<String> published = httpWithKey("POST", "/api/admin/gallery-artworks/"+artwork+"/publications", cookie,
+                publishBody, publishKey);
+        assertThat(published.statusCode()).as(published.body()).isEqualTo(201);
+        assertThat(httpWithKey("POST", "/api/admin/gallery-artworks/"+artwork+"/publications", cookie,publishBody,publishKey).statusCode()).isEqualTo(200);
+        HttpResponse<String> copiedDraft = httpWithKey("POST", "/api/admin/gallery-artworks/"+artwork+"/drafts", cookie, "{}", UUID.randomUUID());
+        assertThat(copiedDraft.statusCode()).isEqualTo(201);
+        HttpResponse<String> detail = http("GET", "/api/admin/gallery-artworks/"+artwork+"?mode=published", cookie, null, null);
+        assertThat(detail.statusCode()).isEqualTo(200);
+        assertThat(detail.body()).contains("\"sourceStatus\":\"DRAFT\"", "\"draft\":{", "\"published\":{", "푸른 물결");
+        assertThat(http("GET", "/api/admin/gallery-artworks?page=0&size=20&states=PUBLISHED_VISIBLE", cookie, null, null).body()).contains(artwork.toString(),"푸른 물결");
+        HttpResponse<String> publicRead = http("GET", "/api/public/gallery-artworks?page=1&size=24", null, null, null);
+        assertThat(publicRead.statusCode()).isEqualTo(200);
+        assertThat(publicRead.body()).contains("푸른 물결", "ART_GAL").doesNotContain("studentConsentId", "studentLabel", "김가람");
+        assertThat(http("GET", "/api/admin/student-consents?type=MEDIA_PUBLICATION&status=ACTIVE&keyword=김가람&page=0&size=10", cookie, null, null).body())
+                .contains("김**", consent.toString()).doesNotContain("김가람");
+        HttpResponse<String> revoked = httpWithIdempotency("POST", "/api/admin/student-consents/"+consent+"/revocation", cookie,
+                "{\"version\":0,\"reason\":\"보호자 철회 요청\"}");
+        assertThat(revoked.statusCode()).as(revoked.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select visible from gallery_artwork where id=?",Boolean.class,draft)).isTrue();
+        assertThat(http("GET", "/api/public/gallery-artworks?page=1&size=24", null, null, null).body()).doesNotContain(artwork.toString(), "푸른 물결");
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")
