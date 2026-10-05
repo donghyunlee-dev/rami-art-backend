@@ -128,10 +128,11 @@ class StudentPersistenceIntegrationTest {
         UUID actor = actor();
         var student = service.create(createCommand("박바다", "010-2222-3333"), actor,
                 UUID.randomUUID(), metadata("student-create"));
-        StatusWrite previewInput = new StatusWrite("PAUSED", LocalDate.now(), "가족 일정으로 일시 중단",
+        LocalDate studioToday = LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        StatusWrite previewInput = new StatusWrite("PAUSED", studioToday, "가족 일정으로 일시 중단",
                 student.version(), null);
         var preview = service.preview(student.id(), previewInput);
-        var changed = service.changeStatus(student.id(), new StatusWrite("PAUSED", LocalDate.now(),
+        var changed = service.changeStatus(student.id(), new StatusWrite("PAUSED", studioToday,
                 "가족 일정으로 일시 중단", student.version(), preview.previewToken()), actor,
                 UUID.randomUUID(), metadata("student-status"));
         assertThat(changed.toStatus()).isEqualTo("PAUSED");

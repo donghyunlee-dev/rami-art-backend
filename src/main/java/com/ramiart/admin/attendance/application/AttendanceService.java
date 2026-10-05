@@ -93,8 +93,25 @@ public class AttendanceService {
 
     @Transactional
     public SavedAttendance save(UUID sessionId, UUID studentId, AttendanceWrite command, Authentication authentication, RequestMetadata metadata) {
+        return save(sessionId, studentId, command, authentication, metadata, null);
+    }
+
+    @Transactional
+    public SavedAttendance save(UUID sessionId, UUID studentId, AttendanceWrite command, Authentication authentication,
+            RequestMetadata metadata, UUID idempotencyKey) {
         UUID actorId = actor(authentication, "ATTENDANCE_WRITE");
         validate(command);
+        String scope = "DTA:" + actorId + ":" + idempotencyKey;
+        String requestHash = hash(sessionId + ":" + studentId + ":" + command.status());
+        if (idempotencyKey != null && !repository.claimIdempotency(scope, idempotencyKey, requestHash)) {
+            if (!repository.idempotencyHash(scope, idempotencyKey).filter(requestHash::equals).isPresent())
+                throw new AttendanceException("IDEMPOTENCY_KEY_REUSED");
+            Session snapshot = findById(sessionId, authentication);
+            Student existing = snapshot.students().stream().filter(value -> value.studentId().equals(studentId)).findFirst()
+                    .orElseThrow(() -> new AttendanceException("ATTENDANCE_TARGET_NOT_FOUND"));
+            if (existing.attendance() == null) throw new AttendanceException("ATTENDANCE_SAVE_FAILED");
+            return new SavedAttendance(existing.attendance(), snapshot.version(), snapshot.summary());
+        }
         SessionState session = repository.lockSession(sessionId).orElseThrow(() -> new AttendanceException("ATTENDANCE_SESSION_NOT_FOUND"));
         ensureOpen(session.status());
         if (session.version() != command.sessionVersion()) throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
@@ -110,6 +127,7 @@ public class AttendanceService {
             throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
         event(actorId, metadata, "ATTENDANCE_RESULT_SAVED", sessionId, Map.of("status", command.status()));
         AttendanceValues saved = repository.findAttendance(sessionId, studentId).orElseThrow(() -> new AttendanceException("ATTENDANCE_SAVE_FAILED"));
+        if (idempotencyKey != null) repository.completeIdempotency(scope, idempotencyKey, sessionId, 200);
         Summary summary = summary(repository.findTargets(sessionId));
         return new SavedAttendance(new Attendance(saved.status(), saved.checkInTime(), saved.reason(), saved.makeupEligible(),
                 saved.version(), saved.updatedAt()), session.version() + 1, summary);

@@ -690,7 +690,7 @@ class AuthPersistenceIntegrationTest {
         String cookie = "__Host-rami_admin_session=" + authSessionService.login(
                 "data-transfer-upload@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_upload_login")).rawToken();
         String csv = "studentName,birthday,joinedAt,guardianName,relationship,guardianPhone,guardianEmail,courseCode,classGroupCode\r\n"
-                + "Minji Park,2015-05-01,2023-03-01,Guardian,MOTHER,01012345678,parent@example.com,ART,CLASS-A\r\n";
+                + "Minji Park,2015-05-01,2023-03-01,Guardian,MOTHER,01012345678,parent@example.com,,\r\n";
 
         HttpResponse<String> response = multipart("/api/admin/data-transfer/imports", cookie,
                 "STUDENT", "STUDENT_V1", "students.csv", csv);
@@ -701,6 +701,187 @@ class AuthPersistenceIntegrationTest {
                 Integer.class, "data-transfer-upload@rami.local")).isOne();
         assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_row r join data_transfer_job j on j.id=r.job_id where j.domain='STUDENT' and r.status='VALID' and r.payload_ciphertext is not null",
                 Integer.class)).isOne();
+    }
+
+    @Test
+    void dataTransferStudentUploadRejectsUnappliedCourseAndClassAssignments() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-assignment-fields@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-assignment-fields@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_transfer_assignment_fields_login")).rawToken();
+        String csv = "studentName,birthday,joinedAt,guardianName,relationship,guardianPhone,guardianEmail,courseCode,classGroupCode\r\n"
+                + "Unassigned Learner,2015-05-01,2023-03-01,Guardian,MOTHER,01055556666,,ART,CLASS-A\r\n";
+
+        HttpResponse<String> response = multipart("/api/admin/data-transfer/imports", cookie,
+                "STUDENT", "STUDENT_V1", "assignments.csv", csv);
+
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='assignments.csv')",
+                String.class)).isEqualTo("INVALID");
+        assertThat(jdbcTemplate.queryForObject("select field_errors::text from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='assignments.csv')",
+                String.class)).contains("NOT_SUPPORTED_FOR_IMPORT");
+    }
+
+    @Test
+    void dataTransferPreviewRejectsRowsThatCannotBeSafelyApplied() throws Exception {
+        createRoleUser("FINANCE", "data-transfer-preview-validation@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-preview-validation@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_transfer_preview_validation_login")).rawToken();
+        String paymentCsv = "billingId,studentId,yearMonth,paidOn,amount,method,memo\r\n"
+                + ",3d0b6d0a-a76e-4053-a6d4-f08470d156e1,2026-10,,50000,TRANSFER,\r\n";
+        String attendanceCsv = "attendanceSessionId,studentId,attendanceStatus\r\n"
+                + "2d430adb-80c5-4c53-a770-60ed72cc3158,3d0b6d0a-a76e-4053-a6d4-f08470d156e1,ABSENT\r\n";
+
+        HttpResponse<String> payment = multipart("/api/admin/data-transfer/imports", cookie,
+                "PAYMENT", "PAYMENT_V1", "missing-paid-on.csv", paymentCsv);
+        HttpResponse<String> attendance = multipart("/api/admin/data-transfer/imports", cookie,
+                "ATTENDANCE", "ATTENDANCE_V1", "missing-absence-reason.csv", attendanceCsv);
+
+        assertThat(payment.statusCode()).as(payment.body()).isEqualTo(201);
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='missing-paid-on.csv')",
+                String.class)).isEqualTo("INVALID");
+        assertThat(jdbcTemplate.queryForObject("select field_errors::text from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='missing-paid-on.csv')",
+                String.class)).contains("REQUIRED");
+        assertThat(attendance.statusCode()).as(attendance.body()).isEqualTo(201);
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='missing-absence-reason.csv')",
+                String.class)).isEqualTo("INVALID");
+        assertThat(jdbcTemplate.queryForObject("select field_errors::text from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='missing-absence-reason.csv')",
+                String.class)).contains("NOT_SUPPORTED_FOR_IMPORT");
+    }
+
+    @Test
+    void dataTransferConfirmRecordsAttendanceIdempotently() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-attendance-confirm@rami.local");
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class,
+                "data-transfer-attendance-confirm@rami.local");
+        UUID course = UUID.randomUUID(), group = UUID.randomUUID(), slot = UUID.randomUUID();
+        UUID schedule = UUID.randomUUID(), item = UUID.randomUUID(), session = UUID.randomUUID(), student = UUID.randomUUID();
+        var today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        jdbcTemplate.update("insert into course(id,code,name,display_order,created_by,updated_by) values(?,?,?,?,?,?)",
+                course, "TR_" + course.toString().substring(0, 8).toUpperCase(), "Transfer", 500, actor, actor);
+        jdbcTemplate.update("insert into class_group(id,course_id,code,name,room_code,capacity,makeup_valid_days,starts_on,status,created_by,updated_by) values(?,?,?,?,?,10,0,?,'ACTIVE',?,?)",
+                group, course, "TG_" + group.toString().substring(0, 8).toUpperCase(), "Transfer", "R1", today.minusDays(1), actor, actor);
+        jdbcTemplate.update("insert into schedule_slot(id,class_group_id,created_by) values(?,?,?)", slot, group, actor);
+        jdbcTemplate.update("insert into monthly_schedule(id,year_month,revision,status,created_by) values(?,? ,1,'DRAFT',?)",
+                schedule, "2099-01", actor);
+        jdbcTemplate.update("insert into monthly_schedule_item(id,schedule_slot_id,monthly_schedule_id,day_of_week,start_time,end_time,title,room_code) values(?,?,?,1,'10:00','11:00','Transfer','R1')",
+                item, slot, schedule);
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,joined_at,created_by,updated_by) values(?,?,?,?,?,?)",
+                student, "Transfer Attendance", "transferattendance", today.minusDays(10), actor, actor);
+        jdbcTemplate.update("insert into attendance_session(id,schedule_item_id,schedule_slot_id,class_group_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count) values(?,?,?,?,?,?,?,?,?,1)",
+                session, item, slot, group, today, "Transfer", "R1", today.atTime(10, 0).atZone(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
+                today.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+        jdbcTemplate.update("insert into attendance_session_student(attendance_session_id,student_id,student_name_snapshot,display_order) values(?,?,?,0)",
+                session, student, "Transfer Attendance");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-attendance-confirm@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_transfer_attendance_confirm_login")).rawToken();
+        String csv = "attendanceSessionId,studentId,attendanceStatus\r\n" + session + "," + student + ",PRESENT\r\n";
+        HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
+                "ATTENDANCE", "ATTENDANCE_V1", "attendance-confirm.csv", csv);
+        UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where source_file_name='attendance-confirm.csv'", UUID.class);
+        UUID rowId = jdbcTemplate.queryForObject("select id from data_transfer_row where job_id=?", UUID.class, jobId);
+        String body = "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}";
+        UUID key = UUID.randomUUID();
+
+        HttpResponse<String> first = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie, body, key);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie, body, key);
+
+        assertThat(upload.statusCode()).as(upload.body()).isEqualTo(201);
+        assertThat(first.statusCode()).as(first.body()).isEqualTo(200);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select status from student_attendance where attendance_session_id=? and student_id=?", String.class, session, student)).isEqualTo("PRESENT");
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where id=?", String.class, rowId)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    void dataTransferConfirmCreatesPaymentAndLedgerEntryOnlyOnce() throws Exception {
+        createRoleUser("FINANCE", "data-transfer-payment-confirm@rami.local");
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class,
+                "data-transfer-payment-confirm@rami.local");
+        UUID student = UUID.randomUUID(), policy = UUID.randomUUID(), item = UUID.randomUUID();
+        UUID assignment = UUID.randomUUID(), batch = UUID.randomUUID(), billing = UUID.randomUUID();
+        var today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        String month = today.toString().substring(0, 7);
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,joined_at,status,created_by,updated_by) values(?,?,?,?,'ACTIVE',?,?)",
+                student, "Transfer Payment", "transferpayment", today.minusYears(8), actor, actor);
+        jdbcTemplate.update("insert into tuition_policy(id,year,revision,status,default_due_day,created_by) values(?,?,1,'DRAFT',25,?)",
+                policy, today.getYear(), actor);
+        jdbcTemplate.update("insert into tuition_policy_item(id,tuition_policy_id,lesson_count_per_week,monthly_amount) values(?,?,2,50000)", item, policy);
+        jdbcTemplate.update("update tuition_policy set status='PUBLISHED',published_by=?,published_at=statement_timestamp() where id=?", actor, policy);
+        jdbcTemplate.update("insert into student_tuition_assignment(id,student_id,policy_item_id,effective_from,created_by,updated_by) values(?,?,?,?,?,?)",
+                assignment, student, item, today.withDayOfMonth(1), actor, actor);
+        jdbcTemplate.update("insert into tuition_billing_batch(id,year_month,requested_count,created_count,existing_count,failed_count,created_amount,status,requested_by,completed_at,idempotency_scope,idempotency_key,request_hash) values(?,?,1,1,0,0,50000,'COMPLETED',?,statement_timestamp(),?,?,repeat('b',64))",
+                batch, month, actor, "transfer-payment:" + actor, UUID.randomUUID());
+        jdbcTemplate.update("insert into tuition_billing(id,billing_batch_id,student_id,year_month,tuition_assignment_id,policy_item_id,billed_amount,adjustment_amount,paid_amount,refunded_amount,due_date,payment_status,issued_by,assignment_version,override_amount_snapshot,override_reason_snapshot,version) values(?,?,?,?,?,?,50000,0,0,0,?,'ISSUED',?,0,null,null,0)",
+                billing, batch, student, month, assignment, item, today.withDayOfMonth(25), actor);
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-payment-confirm@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_transfer_payment_confirm_login")).rawToken();
+        String csv = "billingId,studentId,yearMonth,paidOn,amount,method,memo\r\n"
+                + billing + ",," + month + "," + today + ",10000,TRANSFER,First installment\r\n";
+        HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
+                "PAYMENT", "PAYMENT_V1", "payment-confirm.csv", csv);
+        UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where source_file_name='payment-confirm.csv'", UUID.class);
+        UUID rowId = jdbcTemplate.queryForObject("select id from data_transfer_row where job_id=?", UUID.class, jobId);
+        String body = "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}";
+        UUID key = UUID.randomUUID();
+
+        HttpResponse<String> first = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie, body, key);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/data-transfer/jobs/" + jobId + "/confirm", cookie, body, key);
+
+        assertThat(upload.statusCode()).as(upload.body()).isEqualTo(201);
+        assertThat(first.statusCode()).as(first.body()).isEqualTo(200);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from tuition_payment where billing_id=?", Integer.class, billing)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from financial_entry where source_type='TUITION_PAYMENT' and source_id=(select id from tuition_payment where billing_id=?)", Integer.class, billing)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select paid_amount from tuition_billing where id=?", Long.class, billing)).isEqualTo(10000L);
+        assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where id=?", String.class, rowId)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    void dataTransferExportRequiresPreviewTokenAndUsesAnonymizedPreset() throws Exception {
+        createRoleUser("OWNER", "data-transfer-export@rami.local");
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class,
+                "data-transfer-export@rami.local");
+        UUID student = UUID.randomUUID();
+        jdbcTemplate.update("insert into student(id,student_name,student_name_search,joined_at,status,created_by,updated_by) values(?,?,?,?,'ACTIVE',?,?)",
+                student, "Do Not Export Name", "donotexportname", java.time.LocalDate.now().minusYears(8), actor, actor);
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-export@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_transfer_export_login")).rawToken();
+        String previewBody = "{\"domain\":\"STUDENT\",\"preset\":\"ANONYMIZED\",\"filters\":{},\"purpose\":\"authorized reporting\"}";
+
+        HttpResponse<String> preview = http("POST", "/api/admin/data-transfer/exports/preview", cookie,
+                "http://localhost:3000", previewBody);
+
+        assertThat(preview.statusCode()).as(preview.body()).isEqualTo(200);
+        assertThat(preview.body()).contains("studentKey", "joinedAt", "status", "candidateCount").doesNotContain("Do Not Export Name");
+        String token = java.util.regex.Pattern.compile("\\\"previewToken\\\":\\\"([0-9a-f-]{36})\\\"")
+                .matcher(preview.body()).results().findFirst().orElseThrow().group(1);
+        UUID exportKey = UUID.randomUUID();
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/data-transfer/exports", cookie,
+                "{\"domain\":\"STUDENT\",\"preset\":\"ANONYMIZED\",\"filters\":{},\"purpose\":\"authorized reporting\",\"previewToken\":\"" + token + "\"}",
+                exportKey);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/data-transfer/exports", cookie,
+                "{\"domain\":\"STUDENT\",\"preset\":\"ANONYMIZED\",\"filters\":{},\"purpose\":\"authorized reporting\",\"previewToken\":\"" + token + "\"}",
+                exportKey);
+
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(201);
+        assertThat(created.body()).contains("COMPLETED", "downloadable");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where direction='EXPORT' and domain='STUDENT'", Integer.class)).isOne();
+        org.mockito.Mockito.verify(dataTransferStorage).upload(org.mockito.ArgumentMatchers.startsWith("data-transfers/"),
+                org.mockito.ArgumentMatchers.argThat(bytes -> new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("studentKey,joinedAt,status") && !new String(bytes, java.nio.charset.StandardCharsets.UTF_8).contains("Do Not Export Name")));
+        UUID exportId = jdbcTemplate.queryForObject("select id from data_transfer_job where direction='EXPORT' and domain='STUDENT'", UUID.class);
+        org.mockito.Mockito.when(dataTransferStorage.createSignedUrl(org.mockito.ArgumentMatchers.startsWith("data-transfers/"),
+                org.mockito.ArgumentMatchers.anyInt())).thenReturn("https://storage.example/signed?token=opaque");
+        HttpResponse<String> download = http("GET", "/api/admin/data-transfer/jobs/" + exportId + "/download-url", cookie, null, null);
+        assertThat(download.statusCode()).as(download.body()).isEqualTo(200);
+        assertThat(download.body()).contains("https://storage.example/signed?token=opaque");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where direction='EXPORT'", Integer.class)).isOne();
     }
 
     @Test

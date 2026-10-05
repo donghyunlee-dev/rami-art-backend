@@ -4,6 +4,7 @@ import com.ramiart.admin.datatransfer.application.DataTransferService;
 import com.ramiart.admin.datatransfer.application.DataTransferModels.Job;
 import com.ramiart.admin.datatransfer.application.DataTransferModels.RowPage;
 import com.ramiart.admin.datatransfer.application.DataTransferModels.ConfirmResponse;
+import com.ramiart.admin.datatransfer.application.DataTransferService.ExportRequest;
 import com.ramiart.admin.datatransfer.application.DataTransferService.ConfirmRequest;
 import com.ramiart.admin.datatransfer.application.DataTransferService.RequestMetadata;
 import com.ramiart.admin.common.api.ApiEnvelope;
@@ -80,6 +81,27 @@ public final class DataTransferController {
         RequestMetadata metadata = new RequestMetadata(RequestIdFilter.get(request), request.getRemoteAddr(),
                 userAgent == null ? null : userAgent.substring(0, Math.min(512, userAgent.length())));
         return ok(service.confirm(id, body, key, metadata, authentication), request);
+    }
+
+    @PostMapping("/exports/preview")
+    ResponseEntity<ApiEnvelope<DataTransferService.ExportPreview>> previewExport(@RequestBody ExportRequest body,
+            Authentication authentication, HttpServletRequest request) {
+        return ok(service.previewExport(body, authentication), request);
+    }
+
+    @PostMapping("/exports")
+    ResponseEntity<ApiEnvelope<Job>> createExport(@RequestHeader("Idempotency-Key") UUID key,
+            @RequestBody ExportRequest body, Authentication authentication, HttpServletRequest request) {
+        Job job = service.createExport(body, key, authentication);
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.LOCATION, "/api/admin/data-transfer/jobs/" + job.id())
+                .body(ApiEnvelope.success(job, RequestIdFilter.get(request)));
+    }
+
+    @GetMapping("/jobs/{id}/download-url")
+    ResponseEntity<ApiEnvelope<DataTransferService.DownloadUrl>> downloadUrl(@PathVariable UUID id,
+            Authentication authentication, HttpServletRequest request) {
+        return ok(service.downloadUrl(id, authentication), request);
     }
 
     private static <T> ResponseEntity<ApiEnvelope<T>> ok(T value, HttpServletRequest request) {

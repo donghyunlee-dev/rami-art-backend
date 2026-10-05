@@ -47,12 +47,31 @@ public final class SupabaseDataTransferStorage implements DataTransferStorage {
         } catch (RuntimeException exception) { throw new StorageUnavailable(exception); }
     }
 
+    @Override public String createSignedUrl(String key, int expiresInSeconds) {
+        check();
+        try {
+            var response = client.post().uri(baseUrl + "/storage/v1/object/sign/"
+                            + UriUtils.encodePathSegment(bucket, StandardCharsets.UTF_8) + "/" + encodedKey(key))
+                    .contentType(MediaType.APPLICATION_JSON).header("apikey", serviceKey)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + serviceKey)
+                    .body(java.util.Map.of("expiresIn", expiresInSeconds)).retrieve()
+                    .body(new org.springframework.core.ParameterizedTypeReference<java.util.Map<String, String>>() {});
+            String signed = response == null ? null : response.get("signedURL");
+            if (!StringUtils.hasText(signed)) throw new StorageUnavailable(null);
+            return signed.startsWith("http") ? signed : baseUrl + "/storage/v1" + signed;
+        } catch (RuntimeException exception) { throw new StorageUnavailable(exception); }
+    }
+
     private URI uri(String key) {
-        String path = java.util.Arrays.stream(key.split("/", -1))
-                .map(part -> UriUtils.encodePathSegment(part, StandardCharsets.UTF_8))
-                .collect(java.util.stream.Collectors.joining("/"));
+        String path = encodedKey(key);
         return URI.create(baseUrl + "/storage/v1/object/"
                 + UriUtils.encodePathSegment(bucket, StandardCharsets.UTF_8) + "/" + path);
+    }
+
+    private static String encodedKey(String key) {
+        return java.util.Arrays.stream(key.split("/", -1))
+                .map(part -> UriUtils.encodePathSegment(part, StandardCharsets.UTF_8))
+                .collect(java.util.stream.Collectors.joining("/"));
     }
 
     private void check() {

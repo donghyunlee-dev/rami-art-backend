@@ -66,6 +66,11 @@ public class SecurityConfiguration {
                                 .hasAuthority("DATA_TRANSFER_IMPORT")
                         .requestMatchers(HttpMethod.POST, "/api/admin/data-transfer/jobs/*/confirm")
                                 .hasAuthority("DATA_TRANSFER_IMPORT")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/data-transfer/exports/preview",
+                                "/api/admin/data-transfer/exports")
+                                .hasAuthority("DATA_TRANSFER_EXPORT")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/data-transfer/jobs/*/download-url")
+                                .hasAuthority("DATA_TRANSFER_EXPORT")
                         .requestMatchers(HttpMethod.GET, "/api/admin/data-transfer/jobs/*", "/api/admin/data-transfer/jobs/*/rows")
                                 .hasAnyAuthority("DATA_TRANSFER_IMPORT", "DATA_TRANSFER_EXPORT")
                         .requestMatchers(HttpMethod.GET, "/api/admin/tuition-billings/*/payments")
