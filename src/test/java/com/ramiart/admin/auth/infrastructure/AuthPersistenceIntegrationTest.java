@@ -249,6 +249,50 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void financialEntryHttpEndpointsFilterWriteReplayCancelAndEnforcePermissions() throws Exception {
+        createRoleUser("FINANCE", "finance-ledger@rami.local");
+        createRoleUser("CONTENT", "content-ledger@rami.local");
+        String financeCookie="__Host-rami_admin_session="+authSessionService.login("finance-ledger@rami.local",TEMPORARY_PASSWORD,null,metadata("req_finance_ledger")).rawToken();
+        String contentCookie="__Host-rami_admin_session="+authSessionService.login("content-ledger@rami.local",TEMPORARY_PASSWORD,null,metadata("req_content_ledger")).rawToken();
+        var options=http("GET","/api/admin/finance-ledger-options",financeCookie,null,null);
+        assertThat(options.statusCode()).isEqualTo(200);
+        assertThat(options.headers().firstValue("cache-control").orElseThrow()).contains("no-store");
+        assertThat(options.body()).contains("기본 은행","OTHER_INCOME");
+        assertThat(http("GET","/api/admin/finance-ledger-options",contentCookie,null,null).statusCode()).isEqualTo(403);
+        assertThat(http("GET","/api/admin/finance-settlements/options",financeCookie,null,null).statusCode()).isEqualTo(200);
+        assertThat(http("GET","/api/admin/financial-entries",null,null,null).statusCode()).isEqualTo(401);
+
+        UUID account=jdbcTemplate.queryForObject("select id from finance_account where active order by display_order limit 1",UUID.class);
+        String today=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).toString();
+        String body="{\"transactionDate\":\""+today+"\",\"type\":\"INCOME\",\"accountId\":\""+account+"\",\"categoryCode\":\"OTHER_INCOME\",\"description\":\"통합 원장 검증\",\"amount\":12000}";
+        UUID createKey=UUID.randomUUID();
+        var created=httpWithKey("POST","/api/admin/financial-entries",financeCookie,body,createKey);
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat(created.body()).contains("MANUAL","통합 원장 검증");
+        var settlement=http("GET","/api/admin/finance-settlements?from="+today+"&to="+today,financeCookie,null,null);
+        assertThat(settlement.statusCode()).isEqualTo(200);
+        assertThat(settlement.body()).contains("\"income\":12000","\"entryCount\":1","statuses=CONFIRMED");
+        var replay=httpWithKey("POST","/api/admin/financial-entries",financeCookie,body,createKey);
+        assertThat(replay.statusCode()).isEqualTo(200);
+        assertThat(replay.body()).contains("통합 원장 검증");
+        UUID entry=jdbcTemplate.queryForObject("select id from financial_entry where description='통합 원장 검증'",UUID.class);
+        String cancelBody="{\"reason\":\"통합 테스트 정리\",\"version\":0}";
+        UUID cancelKey=UUID.randomUUID();
+        var cancelled=httpWithKey("POST","/api/admin/financial-entries/"+entry+"/cancellations",financeCookie,cancelBody,cancelKey);
+        assertThat(cancelled.statusCode()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select status from financial_entry where id=?",String.class,entry)).isEqualTo("CANCELLED");
+        assertThat(httpWithKey("POST","/api/admin/financial-entries",contentCookie,body,UUID.randomUUID()).statusCode()).isEqualTo(403);
+    }
+
+    private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
+            throws IOException,InterruptedException {
+        var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")
+                .header("Cookie",cookie).header("Origin","http://localhost:3000").header("Idempotency-Key",key.toString())
+                .method(method,HttpRequest.BodyPublishers.ofString(body)).build();
+        try(var client=HttpClient.newHttpClient()) { return client.send(request,HttpResponse.BodyHandlers.ofString()); }
+    }
+
+    @Test
     void staffHttpEndpointsSeparateReadAndWritePermissions() throws Exception {
         createRoleUser("OWNER", "staff-owner@rami.local");
         createRoleUser("OPERATOR", "staff-operator@rami.local");

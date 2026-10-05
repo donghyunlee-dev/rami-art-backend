@@ -59,6 +59,13 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/admin/tuition-billings/*/payments",
                                 "/api/admin/tuition-payments/*/cancellations")
                                 .hasAuthority("TUITION_PAYMENT_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/financial-entries", "/api/admin/finance-ledger-options")
+                                .hasAuthority("FINANCE_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/finance-settlements", "/api/admin/finance-settlements/**")
+                                .hasAuthority("FINANCE_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/financial-entries",
+                                "/api/admin/financial-entries/*/cancellations")
+                                .hasAuthority("FINANCE_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/tuition/billings/*/adjustments",
                                 "/api/admin/tuition/billings/*/adjustment-preview")
                                 .hasAuthority("TUITION_ADJUSTMENT_READ")
