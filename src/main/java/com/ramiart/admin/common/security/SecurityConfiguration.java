@@ -46,6 +46,7 @@ public class SecurityConfiguration {
                                 "/actuator/health/**",
                                 "/api/admin/auth/sessions/**",
                                 "/api/admin/users/me/password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/admin/auth/reauthentication").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/public/inquiries").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/blog-posts", "/api/public/blog-posts/**",
                                 "/api/public/site-brand").permitAll()
@@ -160,6 +161,12 @@ public class SecurityConfiguration {
                                 .hasAuthority("SCHEDULE_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/monthly-schedules/*/publications")
                                 .hasAuthority("SCHEDULE_PUBLISH")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/makeups", "/api/admin/makeups/**")
+                                .authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/admin/makeups/*/reservations",
+                                "/api/admin/makeups/*/reservation-cancellation", "/api/admin/makeups/*/waiver",
+                                "/api/admin/makeups/*/extension")
+                                .authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/admin/attendance-sessions", "/api/admin/attendance-sessions/**")
                                 .hasAuthority("ATTENDANCE_READ")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/attendance-sessions/*/students/*")

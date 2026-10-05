@@ -8,6 +8,9 @@ import com.ramiart.admin.attendance.application.AttendanceService.AttendanceExce
 import com.ramiart.admin.attendance.application.AttendanceModels.AttendanceWrite;
 import com.ramiart.admin.attendance.application.AttendanceModels.CloseWrite;
 import com.ramiart.admin.attendance.application.AttendanceService.RequestMetadata;
+import com.ramiart.admin.makeup.application.MakeupRepository;
+import com.ramiart.admin.makeup.application.MakeupService;
+import com.ramiart.admin.makeup.infrastructure.JdbcMakeupRepository;
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
 import com.ramiart.admin.dev.PostgresScriptRunner;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +31,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 
@@ -37,12 +42,15 @@ class AttendancePersistenceIntegrationTest {
 
     DataSource dataSource = POSTGRES.getPostgresDatabase();
     AttendanceService attendanceService;
+    MakeupService makeupService;
     JdbcTemplate jdbc;
     UUID actorId;
+    TransactionTemplate transaction;
 
     @BeforeAll
     void resetDatabase() throws SQLException, IOException {
         jdbc = new JdbcTemplate(dataSource);
+        transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             createRoleIfMissing(statement, "anon");
             createRoleIfMissing(statement, "authenticated");
@@ -61,6 +69,7 @@ class AttendancePersistenceIntegrationTest {
         actorId = jdbc.queryForObject("select id from admin_user order by email limit 1", UUID.class);
         JdbcClient client = JdbcClient.create(dataSource);
         attendanceService = new AttendanceService(new JdbcAttendanceRepository(client), new JdbcAuditRecorder(client, new ObjectMapper()));
+        makeupService = new MakeupService(new JdbcMakeupRepository(client), new JdbcAuditRecorder(client, new ObjectMapper()), org.mockito.Mockito.mock(com.ramiart.admin.auth.application.AdminReauthenticationService.class));
     }
 
     @AfterAll
@@ -161,6 +170,75 @@ class AttendancePersistenceIntegrationTest {
                     assertThat(student.get("studentName")).isEqualTo("통합 검증 원생");
                     assertThat(student.get("missingFields")).isEqualTo(java.util.List.of("status"));
                 });
+    }
+
+    @Test
+    void makeupReservationAndCancellationKeepAttendanceSnapshotAndCapacityConsistent() {
+        UUID originSession = insertAttendanceFixture("보강 원본 반");
+        UUID studentId = jdbc.queryForObject("select student_id from attendance_session_student where attendance_session_id=?", UUID.class, originSession);
+        var writeAuth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_WRITE");
+        var closeAuth = new TestingAuthenticationToken(actorId.toString(), "", "ATTENDANCE_CLOSE");
+        var makeupAuth = new TestingAuthenticationToken(actorId.toString(), "", "MAKEUP_READ", "MAKEUP_WRITE");
+        var metadata = new RequestMetadata("req_makeup_roundtrip", "127.0.0.1", "integration-test");
+        attendanceService.save(originSession, studentId, new AttendanceWrite("ABSENT", null, "질병 결석", true, null, 0), writeAuth, metadata);
+        attendanceService.close(originSession, new CloseWrite(1), closeAuth, UUID.randomUUID(), metadata);
+        UUID caseId = jdbc.queryForObject("select id from makeup_case where origin_session_id=?", UUID.class, originSession);
+        UUID slotId = jdbc.queryForObject("select schedule_slot_id from attendance_session where id=?", UUID.class, originSession);
+        UUID itemId = jdbc.queryForObject("select schedule_item_id from attendance_session where id=?", UUID.class, originSession);
+        UUID groupId = jdbc.queryForObject("select class_group_id from attendance_session where id=?", UUID.class, originSession);
+        LocalDate futureDate = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(7);
+        UUID targetSession = UUID.randomUUID();
+        jdbc.update("insert into attendance_session(id,schedule_item_id,schedule_slot_id,class_group_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at) values(?,?,?,?,?,?,?,?,?)",
+                targetSession,itemId,slotId,groupId,futureDate,"보강 예약 반","ROOM_A",futureDate.atTime(10,0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),futureDate.atTime(11,0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+
+        var candidates = makeupService.candidates(caseId, futureDate, futureDate, makeupAuth);
+        assertThat(candidates.items()).extracting(item -> item.sessionId()).contains(targetSession);
+        UUID reserveKey=UUID.randomUUID();
+        var reservationBody=new com.ramiart.admin.makeup.application.MakeupModels.Reservation(targetSession, 0, 0);
+        var reserved = transaction.execute(status -> makeupService.reserve(caseId, reservationBody, reserveKey, makeupAuth,
+                new MakeupService.Metadata("req_makeup_reserve", "127.0.0.1", "integration-test")));
+        var replayed=transaction.execute(status->makeupService.reserve(caseId,reservationBody,reserveKey,makeupAuth,
+                new MakeupService.Metadata("req_makeup_reserve_replay","127.0.0.1","integration-test")));
+        assertThat(reserved.detail().makeupCase().status()).isEqualTo("RESERVED");
+        assertThat(replayed.created()).isFalse();
+        assertThat(jdbc.queryForObject("select target_count from attendance_session where id=?", Integer.class, targetSession)).isOne();
+
+        var cancelled = transaction.execute(status -> makeupService.cancel(caseId, new com.ramiart.admin.makeup.application.MakeupModels.VersionedReason(1, "일정 변경"), UUID.randomUUID(), makeupAuth,
+                new MakeupService.Metadata("req_makeup_cancel", "127.0.0.1", "integration-test")));
+        assertThat(cancelled.makeupCase().status()).isEqualTo("AVAILABLE");
+        assertThat(cancelled.history()).extracting(attempt -> attempt.status()).contains("CANCELLED");
+        assertThat(jdbc.queryForObject("select target_count from attendance_session where id=?", Integer.class, targetSession)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from attendance_session_student where attendance_session_id=? and makeup_case_id=?", Integer.class, targetSession, caseId)).isZero();
+
+        transaction.executeWithoutResult(status -> makeupService.reserve(caseId, new com.ramiart.admin.makeup.application.MakeupModels.Reservation(targetSession, 2, 2), UUID.randomUUID(), makeupAuth,
+                new MakeupService.Metadata("req_makeup_reserve_again", "127.0.0.1", "integration-test")));
+        var substitute = attendanceService.save(targetSession, studentId,
+                new AttendanceWrite("PRESENT", null, null, false, null, 3), writeAuth, metadata);
+        assertThat(substitute.sessionVersion()).isEqualTo(4);
+        attendanceService.close(targetSession, new CloseWrite(4), closeAuth, UUID.randomUUID(), metadata);
+        assertThat(jdbc.queryForObject("select status from makeup_case where id=?", String.class, caseId)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("select completed_attendance_id from makeup_case where id=?", UUID.class, caseId)).isNotNull();
+    }
+
+    @Test
+    void makeupExpiryIsIdempotentAndOnlyExpiresAvailableCases() {
+        UUID sessionId=insertAttendanceFixture("보강 만료 반");
+        UUID studentId=jdbc.queryForObject("select student_id from attendance_session_student where attendance_session_id=?",UUID.class,sessionId);
+        var writeAuth=new TestingAuthenticationToken(actorId.toString(),"","ATTENDANCE_WRITE");
+        var closeAuth=new TestingAuthenticationToken(actorId.toString(),"","ATTENDANCE_CLOSE");
+        var metadata=new RequestMetadata("req_makeup_expiry","127.0.0.1","integration-test");
+        attendanceService.save(sessionId,studentId,new AttendanceWrite("ABSENT",null,"미출석",true,null,0),writeAuth,metadata);
+        attendanceService.close(sessionId,new CloseWrite(1),closeAuth,UUID.randomUUID(),metadata);
+        UUID caseId=jdbc.queryForObject("select id from makeup_case where origin_session_id=?",UUID.class,sessionId);
+        jdbc.update("update makeup_case set expires_on=? where id=?",LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(1),caseId);
+
+        int expired=transaction.execute(status->makeupService.expireAvailableCases(LocalDate.now(ZoneId.of("Asia/Seoul"))));
+
+        assertThat(expired).isOne();
+        assertThat(jdbc.queryForObject("select status from makeup_case where id=?",String.class,caseId)).isEqualTo("EXPIRED");
+        Integer secondRun=transaction.execute(status->makeupService.expireAvailableCases(LocalDate.now(ZoneId.of("Asia/Seoul"))));
+        assertThat(secondRun.intValue()).isEqualTo(0);
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where action='MAKEUP_CASE_EXPIRED' and target_id=?",Integer.class,caseId)).isOne();
     }
 
     private UUID insertAttendanceFixture(String className) {

@@ -36,6 +36,7 @@ public interface AttendanceRepository {
     int closeSession(UUID sessionId, long expectedVersion, UUID actorId, java.time.OffsetDateTime closedAt,
                      AttendanceModels.Summary summary);
     java.util.List<MakeupValue> createMakeupCases(UUID sessionId, UUID actorId, int validDays);
+    int finalizeReservedMakeupCases(UUID sessionId, UUID actorId, LocalDate today);
     java.util.Optional<AttendanceValues> findAttendance(UUID sessionId, UUID studentId);
     boolean claimIdempotency(String scope, UUID key, String requestHash);
     java.util.Optional<String> idempotencyHash(String scope, UUID key);

@@ -130,11 +130,26 @@ public class JdbcAttendanceRepository implements AttendanceRepository {
                 select gen_random_uuid(),attendance.student_id,attendance.id,session.id,session.class_group_id,'AVAILABLE',
                        session.attendance_date + :validDays, :actor, :actor
                   from student_attendance attendance join attendance_session session on session.id=attendance.attendance_session_id
-                 where session.id=:session and attendance.makeup_eligible
+                  join attendance_session_student target on target.attendance_session_id=session.id and target.student_id=attendance.student_id
+                 where session.id=:session and attendance.makeup_eligible and target.makeup_case_id is null
                 on conflict (origin_attendance_id) do nothing
                 returning id,student_id
                 """).param("validDays", validDays).param("actor", actorId).param("session", sessionId)
                 .query((r, n) -> new MakeupValue(r.getObject("id", UUID.class), r.getObject("student_id", UUID.class))).list();
+    }
+
+    @Override public int finalizeReservedMakeupCases(UUID sessionId, UUID actorId, LocalDate today) {
+        return jdbc.sql("""
+                update makeup_case m
+                   set status=case when a.status in ('PRESENT','LATE') then 'COMPLETED'
+                                   when m.expires_on >= :today then 'AVAILABLE' else 'EXPIRED' end,
+                       completed_attendance_id=case when a.status in ('PRESENT','LATE') then a.id else null end,
+                       reserved_session_id=case when a.status in ('PRESENT','LATE') then m.reserved_session_id else null end,
+                       attempt_count=m.attempt_count+1,updated_by=:actor,version=m.version+1
+                  from attendance_session s
+                  join student_attendance a on a.attendance_session_id=s.id
+                 where s.id=:session and m.reserved_session_id=s.id and m.student_id=a.student_id and m.status='RESERVED'
+                """).param("actor",actorId).param("session",sessionId).param("today",today).update();
     }
 
     @Override public Optional<AttendanceValues> findAttendance(UUID sessionId, UUID studentId) {

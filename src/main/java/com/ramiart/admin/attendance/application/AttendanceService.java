@@ -149,6 +149,7 @@ public class AttendanceService {
             throw new AttendanceException("ATTENDANCE_VERSION_CONFLICT");
         List<AttendanceRepository.MakeupValue> makeups = session.makeupValidDays() > 0
                 ? repository.createMakeupCases(sessionId, actorId, session.makeupValidDays()) : List.of();
+        repository.finalizeReservedMakeupCases(sessionId, actorId, LocalDate.now(STUDIO_ZONE));
         event(actorId, metadata, "ATTENDANCE_SESSION_CLOSED", sessionId, Map.of("targetCount", summary.totalCount(), "createdMakeupCount", makeups.size()));
         repository.completeIdempotency(scope, key, sessionId, 201);
         ClosedSession closed = closedSnapshot(sessionId);

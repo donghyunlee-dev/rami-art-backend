@@ -227,6 +227,28 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void makeupHttpEndpointsEnforceSessionAndRolePermissions() throws Exception {
+        createRoleUser("OPERATOR", "makeup-operator@rami.local");
+        createRoleUser("CONTENT", "makeup-content@rami.local");
+        String operatorCookie="__Host-rami_admin_session="+authSessionService.login("makeup-operator@rami.local",TEMPORARY_PASSWORD,null,metadata("req_makeup_operator")).rawToken();
+        String contentCookie="__Host-rami_admin_session="+authSessionService.login("makeup-content@rami.local",TEMPORARY_PASSWORD,null,metadata("req_makeup_content")).rawToken();
+
+        var list=http("GET","/api/admin/makeups?status=AVAILABLE",operatorCookie,null,null);
+        assertThat(list.statusCode()).isEqualTo(200);
+        assertThat(list.headers().firstValue("cache-control").orElseThrow()).contains("no-store");
+        var denied=httpWithIdempotency("POST","/api/admin/makeups/00000000-0000-0000-0000-000000000099/reservations",contentCookie,
+                "{\"sessionId\":\"00000000-0000-0000-0000-000000000100\",\"caseVersion\":0,\"sessionVersion\":0}");
+        assertThat(denied.statusCode()).isEqualTo(403);
+        assertThat(denied.body()).contains("MAKEUP_WRITE_DENIED");
+        assertThat(http("GET","/api/admin/makeups",contentCookie,null,null).body()).contains("MAKEUP_READ_DENIED");
+        var badReauthentication=http("POST","/api/admin/auth/reauthentication",operatorCookie,"http://localhost:3000",
+                "{\"password\":\"wrong-password\",\"purpose\":\"MAKEUP_EXTENSION\"}");
+        assertThat(badReauthentication.statusCode()).isEqualTo(403);
+        assertThat(badReauthentication.body()).contains("REAUTHENTICATION_FAILED").doesNotContain("reauthToken");
+        assertThat(http("GET","/api/admin/makeups",null,null,null).statusCode()).isEqualTo(401);
+    }
+
+    @Test
     void staffHttpEndpointsSeparateReadAndWritePermissions() throws Exception {
         createRoleUser("OWNER", "staff-owner@rami.local");
         createRoleUser("OPERATOR", "staff-operator@rami.local");
