@@ -56,6 +56,10 @@ public class SecurityConfiguration {
                                 .authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/monthly")
                                 .authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/data-transfer/templates/*")
+                                .hasAuthority("DATA_TRANSFER_IMPORT")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/data-transfer/jobs/*", "/api/admin/data-transfer/jobs/*/rows")
+                                .hasAnyAuthority("DATA_TRANSFER_IMPORT", "DATA_TRANSFER_EXPORT")
                         .requestMatchers(HttpMethod.GET, "/api/admin/tuition-billings/*/payments")
                                 .hasAuthority("TUITION_PAYMENT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/tuition-billings/*/payments",

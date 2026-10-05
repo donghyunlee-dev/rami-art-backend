@@ -591,6 +591,48 @@ class AuthPersistenceIntegrationTest {
         assertThat(invalidMonth.body()).contains("DASHBOARD_MONTH_NOT_SUPPORTED");
     }
 
+    @Test
+    void dataTransferTemplateIsVersionedCsvAndRequiresImportPermission() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-template-operator@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-template-operator@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_template")).rawToken();
+
+        HttpResponse<String> anonymous = http("GET", "/api/admin/data-transfer/templates/STUDENT", null, null, null);
+        HttpResponse<String> allowed = http("GET", "/api/admin/data-transfer/templates/STUDENT", cookie, null, null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(allowed.statusCode()).as(allowed.body()).isEqualTo(200);
+        assertThat(allowed.headers().firstValue("Content-Type").orElse("")).contains("text/csv");
+        assertThat(allowed.headers().firstValue("X-Template-Version").orElse("")).isEqualTo("STUDENT_V1");
+        assertThat(allowed.body()).contains("studentName", "guardianPhone").doesNotContain("example@example.com");
+    }
+
+    @Test
+    void dataTransferJobReadIsCreatorScopedAndDoesNotExposeFileKey() throws Exception {
+        createRoleUser("OPERATOR", "data-transfer-job-owner@rami.local");
+        createRoleUser("OWNER", "data-transfer-job-other@rami.local");
+        UUID ownerId = jdbcTemplate.queryForObject("select id from admin_user where email=?", UUID.class,
+                "data-transfer-job-owner@rami.local");
+        UUID jobId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into data_transfer_job(id,direction,domain,status,template_version,source_file_name,storage_key,sha256,file_size,
+                    expires_at,created_by)
+                values(?,'IMPORT','STUDENT','READY','STUDENT_V1','students.csv','private/test.csv',repeat('a',64),12,
+                    statement_timestamp()+interval '1 day',?)
+                """, jobId, ownerId);
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-job-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_job_owner")).rawToken();
+        String otherCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "data-transfer-job-other@rami.local", TEMPORARY_PASSWORD, null, metadata("req_transfer_job_other")).rawToken();
+
+        HttpResponse<String> own = http("GET", "/api/admin/data-transfer/jobs/" + jobId, ownerCookie, null, null);
+        HttpResponse<String> other = http("GET", "/api/admin/data-transfer/jobs/" + jobId, otherCookie, null, null);
+
+        assertThat(own.statusCode()).as(own.body()).isEqualTo(200);
+        assertThat(own.body()).contains(jobId.toString(), "READY", "STUDENT_V1").doesNotContain("private/test.csv");
+        assertThat(other.statusCode()).isEqualTo(404);
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")
