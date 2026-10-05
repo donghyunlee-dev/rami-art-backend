@@ -15,7 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice
+@RestControllerAdvice(basePackageClasses = BlogController.class)
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public final class BlogExceptionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(BlogExceptionHandler.class);

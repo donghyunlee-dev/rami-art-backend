@@ -395,6 +395,135 @@ class AuthPersistenceIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("select status from notification_message where id=?",String.class,message)).isEqualTo("CANCELLED");
     }
 
+    @Test
+    void studioProfileRevisionRoutesPublishOneConsistentPublicRevision() throws Exception {
+        createRoleUser("OWNER", "studio-profile-owner@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "studio-profile-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_studio_profile_owner")).rawToken();
+        UUID draftKey = UUID.randomUUID();
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/studio-profile/drafts", cookie, "", draftKey);
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        UUID draftId = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body())
+                .path("data").path("draftId").asText());
+
+        String content = """
+                {"version":0,"studioName":"라미아트 테스트","phone":"+821012345678",
+                 "email":"hello@rami-art.example","address":"서울시 강남구 예술로 10",
+                 "addressDetail":"","latitude":37.123456,"longitude":127.123456,
+                 "businessHours":[{"day":1,"closed":false,"open":"10:00","close":"19:00"},
+                                   {"day":7,"closed":true,"open":null,"close":null}],
+                 "closedDays":"","transitGuide":"2번 출구 도보 5분","parkingGuide":""}
+                """;
+        HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/studio-profile/drafts/" + draftId,
+                cookie, content, UUID.randomUUID());
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(saved.body()).contains("\"version\":1", "\"addressDetail\":null", "\"closedDays\":null");
+        HttpResponse<String> stalePreview = http("GET", "/api/admin/studio-profile/drafts/" + draftId + "/preview?version=0",
+                cookie, null, null);
+        assertThat(stalePreview.statusCode()).isEqualTo(409);
+        HttpResponse<String> duplicateDay = httpWithKey("PUT", "/api/admin/studio-profile/drafts/" + draftId,
+                cookie, content.replace("\"day\":7", "\"day\":1"), UUID.randomUUID());
+        assertThat(duplicateDay.statusCode()).isEqualTo(422);
+        HttpResponse<String> imageField = httpWithKey("PUT", "/api/admin/studio-profile/drafts/" + draftId,
+                cookie, content.replace("\"parkingGuide\":\"\"", "\"parkingGuide\":\"\",\"imageAssetId\":\"" + UUID.randomUUID() + "\""),
+                UUID.randomUUID());
+        assertThat(imageField.statusCode()).isEqualTo(400);
+        assertThat(http("GET", "/api/admin/studio-profile/drafts/" + draftId + "/preview?version=1",
+                cookie, null, null).body()).contains("HOME", "CONTACT", "FOOTER");
+
+        UUID publishKey = UUID.randomUUID();
+        String publish = "{\"draftId\":\"" + draftId + "\",\"draftVersion\":1}";
+        HttpResponse<String> published = httpWithKey("POST", "/api/admin/studio-profile/publications",
+                cookie, publish, publishKey);
+        assertThat(published.statusCode()).as(published.body()).isEqualTo(201);
+        HttpResponse<String> replay = httpWithKey("POST", "/api/admin/studio-profile/publications", cookie, publish, publishKey);
+        assertThat(replay.statusCode()).isEqualTo(200);
+        assertThat(replay.body()).contains(draftId.toString());
+        HttpResponse<String> publicProfile = http("GET", "/api/public/studio-profile", null, null, null);
+        assertThat(publicProfile.statusCode()).isEqualTo(200);
+        assertThat(publicProfile.headers().firstValue("cache-control").orElseThrow()).contains("max-age=60", "public");
+        assertThat(publicProfile.body()).contains("라미아트 테스트")
+                .doesNotContain("DRAFT", "version", "createdBy", "draftId", "profileId");
+    }
+
+    @Test
+    void directorProfileRevisionRoutesKeepHiddenCareersOutOfPublicRead() throws Exception {
+        createRoleUser("OWNER", "director-profile-owner@rami.local");
+        createRoleUser("OPERATOR", "director-profile-content@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "director-profile-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_director_profile_owner")).rawToken();
+        String contentCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "director-profile-content@rami.local", TEMPORARY_PASSWORD, null, metadata("req_director_profile_content")).rawToken();
+        assertThat(http("GET", "/api/admin/director-profile?mode=DRAFT", contentCookie, null, null).statusCode()).isEqualTo(403);
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/director-profile/drafts", ownerCookie, "", UUID.randomUUID());
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        UUID draftId = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body())
+                .path("data").path("draftId").asText());
+        UUID visibleCareer = UUID.randomUUID();
+        UUID hiddenCareer = UUID.randomUUID();
+        String write = """
+                {"version":0,"name":"이원장","title":"라미아트 원장",
+                 "introduction":"아이의 시선을 존중합니다.","careers":[
+                   {"id":"%s","period":"2018~현재","title":"아동미술 교육","displayOrder":0,"hidden":false},
+                   {"id":"%s","period":null,"title":"비공개 경력","displayOrder":1,"hidden":true}]}
+                """.formatted(visibleCareer, hiddenCareer);
+        HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/director-profile/drafts/" + draftId,
+                ownerCookie, write, UUID.randomUUID());
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(saved.body()).contains("\"version\":1", "비공개 경력");
+        assertThat(http("GET", "/api/admin/director-profile/drafts/" + draftId + "/preview?version=1",
+                ownerCookie, null, null).body()).contains("adminPreview", "publicProfile", "비공개 경력");
+        String publication = "{\"draftId\":\"" + draftId + "\",\"draftVersion\":1}";
+        UUID key = UUID.randomUUID();
+        HttpResponse<String> published = httpWithKey("POST", "/api/admin/director-profile/publications",
+                ownerCookie, publication, key);
+        assertThat(published.statusCode()).as(published.body()).isEqualTo(201);
+        assertThat(httpWithKey("POST", "/api/admin/director-profile/publications", ownerCookie, publication, key).statusCode())
+                .isEqualTo(200);
+        HttpResponse<String> publicProfile = http("GET", "/api/public/director-profile", null, null, null);
+        assertThat(publicProfile.statusCode()).isEqualTo(200);
+        assertThat(publicProfile.body()).contains("이원장", "아동미술 교육")
+                .doesNotContain("비공개 경력", "hidden", "profileId", "draftId", "version");
+    }
+
+    @Test
+    void classProgramRevisionRoutesPublishOnlyVisibleReadyMediaCards() throws Exception {
+        createRoleUser("OWNER", "class-program-owner@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "class-program-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_class_program_owner")).rawToken();
+        UUID actor = UUID.nameUUIDFromBytes("test-admin-OWNER".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        UUID course = UUID.randomUUID();
+        jdbcTemplate.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,?,0,true,?,?)",
+                course, "ART_HTTP", "HTTP 미술 과정", actor, actor);
+        HttpResponse<String> list = http("GET", "/api/admin/content/class-programs", cookie, null, null);
+        assertThat(list.statusCode()).isEqualTo(200);
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/content/class-programs/" + course + "/drafts",
+                cookie, "", UUID.randomUUID());
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        UUID draft = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body()).path("data").path("draft").path("id").asText());
+        UUID asset = UUID.fromString("" + jdbcTemplate.queryForObject("select id from media_asset where storage_key='seed/generic-brand-share.png'", UUID.class));
+        String emptyDraft = "{\"version\":0,\"audienceLabel\":\"\",\"title\":\"\",\"description\":\"\",\"activities\":[\"\"],\"mediaAssetId\":null,\"altText\":\"\",\"visible\":false,\"displayOrder\":0}";
+        HttpResponse<String> incomplete = httpWithKey("PUT", "/api/admin/content/class-programs/" + course + "/drafts/" + draft,
+                cookie, emptyDraft, UUID.randomUUID());
+        assertThat(incomplete.statusCode()).as(incomplete.body()).isEqualTo(200);
+        assertThat(incomplete.body()).contains("\"version\":1");
+        String save = "{\"version\":0,\"audienceLabel\":\"초등\",\"title\":\"색과 형태\",\"description\":\"표현 활동\",\"activities\":[\"관찰\",\"그리기\"],\"mediaAssetId\":\"" + asset + "\",\"altText\":\"작품 이미지\",\"visible\":true,\"displayOrder\":0}";
+        save = save.replace("\"version\":0", "\"version\":1");
+        HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/content/class-programs/" + course + "/drafts/" + draft,
+                cookie, save, UUID.randomUUID());
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from media_asset_reference where owner_type='CLASS_PROGRAM' and owner_id=? and reference_state='DRAFT'", Integer.class, draft)).isEqualTo(1);
+        String publication = "{\"draftId\":\"" + draft + "\",\"version\":2,\"changeSummary\":\"첫 발행\"}";
+        UUID key = UUID.randomUUID();
+        HttpResponse<String> published = httpWithKey("POST", "/api/admin/content/class-programs/" + course + "/publications", cookie, publication, key);
+        assertThat(published.statusCode()).as(published.body()).isEqualTo(201);
+        assertThat(httpWithKey("POST", "/api/admin/content/class-programs/" + course + "/publications", cookie, publication, key).statusCode()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject("select reference_state from media_asset_reference where owner_type='CLASS_PROGRAM' and owner_id=?", String.class, draft)).isEqualTo("PUBLISHED");
+        HttpResponse<String> publicRead = http("GET", "/api/public/class-programs", null, null, null);
+        assertThat(publicRead.statusCode()).isEqualTo(200);
+        assertThat(publicRead.body()).contains("색과 형태", "작품 이미지", "ART_HTTP").doesNotContain("DRAFT", "mediaAssetId", "version");
+    }
+
     private HttpResponse<String> httpWithKey(String method,String path,String cookie,String body,UUID key)
             throws IOException,InterruptedException {
         var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Content-Type","application/json")

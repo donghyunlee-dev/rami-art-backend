@@ -141,6 +141,34 @@ public class SecurityConfiguration {
                                 .hasAuthority("SITE_BRAND_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/site-brand/draft/*/publish")
                                 .hasAuthority("SITE_BRAND_PUBLISH")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/studio-profile",
+                                "/api/admin/studio-profile/drafts/*/preview")
+                                .hasAuthority("CONTENT_PROFILE_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/studio-profile/drafts",
+                                "/api/admin/studio-profile/publications")
+                                .hasAuthority("CONTENT_PROFILE_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/studio-profile/drafts/*")
+                                .hasAuthority("CONTENT_PROFILE_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/public/studio-profile").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/director-profile",
+                                "/api/admin/director-profile/drafts/*/preview")
+                                .hasAuthority("CONTENT_PROFILE_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/director-profile/drafts",
+                                "/api/admin/director-profile/publications")
+                                .hasAuthority("CONTENT_PROFILE_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/director-profile/drafts/*")
+                                .hasAuthority("CONTENT_PROFILE_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/public/director-profile").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/content/class-programs", "/api/admin/content/class-programs/**")
+                                .hasAuthority("CONTENT_PROGRAM_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/content/class-programs/preview")
+                                .hasAuthority("CONTENT_PROGRAM_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/content/class-programs/*/drafts",
+                                "/api/admin/content/class-programs/*/publications")
+                                .hasAuthority("CONTENT_PROGRAM_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/content/class-programs/*/drafts/*")
+                                .hasAuthority("CONTENT_PROGRAM_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/public/class-programs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/courses", "/api/admin/courses/**",
                                 "/api/admin/class-groups/*/occupancy").hasAuthority("COURSE_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/courses", "/api/admin/courses/*/class-groups")

@@ -15,7 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice
+@RestControllerAdvice(basePackageClasses = SiteBrandController.class)
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class SiteBrandExceptionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(SiteBrandExceptionHandler.class);
