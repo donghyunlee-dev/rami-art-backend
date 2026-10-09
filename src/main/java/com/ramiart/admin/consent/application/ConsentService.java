@@ -81,7 +81,7 @@ public class ConsentService {
         if(!repository.studentExists(studentId))throw new ConsentException("STUDENT_NOT_FOUND");if(!repository.guardianBelongsTo(request.guardianContactId(),studentId))throw new ConsentException("CONSENT_GUARDIAN_MISMATCH");
         Policy requested=repository.policy(request.policyId()).orElseThrow(()->new ConsentException("CONSENT_POLICY_NOT_PUBLISHED"));Policy policy=repository.currentPublishedPolicy(requested.id(),requested.type()).orElseThrow(()->new ConsentException("CONSENT_POLICY_NOT_PUBLISHED"));
         if(policy.evidenceRequired()&&request.evidenceAssetId()==null)throw new ConsentException("CONSENT_EVIDENCE_REQUIRED");
-        if(request.evidenceAssetId()!=null&&!repository.privateReadyEvidence(request.evidenceAssetId()))throw new ConsentException("CONSENT_EVIDENCE_PRIVATE_REQUIRED");
+        if(request.evidenceAssetId()!=null&&!repository.privateReadyEvidence(request.evidenceAssetId(),studentId))throw new ConsentException("CONSENT_EVIDENCE_PRIVATE_REQUIRED");
         OffsetDateTime consentedAt=request.consentedAt()==null?OffsetDateTime.now(clock):request.consentedAt();if(consentedAt.isAfter(OffsetDateTime.now(clock).plusSeconds(2)))throw new ConsentException("CONSENT_DATE_FUTURE");
         if(repository.studentConsents(studentId).stream().anyMatch(c->c.type().equals(policy.type())&&c.currentConsent()!=null&&c.currentConsent().policyId().equals(policy.id())&&"ACTIVE".equals(c.currentConsent().status())))throw new ConsentException("CONSENT_ACTIVE_EXISTS");
         UUID id=repository.insertConsent(studentId,policy,request,actor,consentedAt);repository.complete(scope,key,id,201);StudentConsent result=repository.consent(id).orElseThrow(()->new ConsentException("CONSENT_NOT_FOUND"));

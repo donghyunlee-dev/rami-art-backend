@@ -8,7 +8,7 @@ public final class DataTransferModels {
     private DataTransferModels() {}
     public record Job(UUID id, String direction, String domain, String status, String templateVersion,
             int totalCount, int validCount, int invalidCount, int duplicateCount, int confirmedCount, int failedCount,
-            int progressPercent, long version, OffsetDateTime expiresAt, boolean downloadable) {}
+            int progressPercent, long version, OffsetDateTime expiresAt, boolean downloadable, String errorCode) {}
     public record FieldError(String field, String code) {}
     public record DuplicateCandidate(UUID id, String maskedSummary) {}
     public record Row(UUID id, int rowNumber, String status, String maskedSummary, List<FieldError> fieldErrors,

@@ -47,6 +47,14 @@ public class SecurityConfiguration {
                                 "/api/admin/auth/sessions/**",
                                 "/api/admin/users/me/password").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/admin/auth/reauthentication").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/retention/**")
+                                .hasAuthority("RETENTION_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/retention/previews")
+                                .hasAuthority("RETENTION_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/retention/**")
+                                .hasAuthority("RETENTION_EXECUTE")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/students/*/consent-evidence-assets")
+                                .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/public/inquiries").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/blog-posts", "/api/public/blog-posts/**",
                                 "/api/public/site-brand").permitAll()

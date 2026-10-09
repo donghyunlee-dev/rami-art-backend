@@ -38,6 +38,12 @@ app:
     bootstrap-admin-password: TestOnlyPassword123!
 
 admin:
+  retention:
+    worker-enabled: false
+  data-transfer:
+    worker-enabled: false
+  consent:
+    worker-enabled: false
   security:
     allowed-origin: http://localhost:3000
     staff-phone-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=

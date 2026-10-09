@@ -17,7 +17,7 @@ public interface ConsentRepository {
     List<ConsentTypeStatus> studentConsents(UUID studentId);
     boolean guardianBelongsTo(UUID guardianId,UUID studentId);
     Optional<Policy> currentPublishedPolicy(UUID id,String type);
-    boolean privateReadyEvidence(UUID assetId);
+    boolean privateReadyEvidence(UUID assetId,UUID studentId);
     UUID insertConsent(UUID studentId,Policy policy,CollectConsent request,UUID actor,OffsetDateTime consentedAt);
     Optional<StudentConsent> consent(UUID id);
     boolean revoke(UUID id,long version,String reason,UUID actor);

@@ -82,7 +82,7 @@ public class JdbcConsentRepository implements ConsentRepository {
         return available;
     }
     @Override public Optional<Policy> currentPublishedPolicy(UUID id,String type){return jdbc.query("select "+POLICY_COLUMNS+" from consent_policy where id=:id and type=:type and status='PUBLISHED'",Map.of("id",id,"type",type),this::policyRow).stream().findFirst();}
-    @Override public boolean privateReadyEvidence(UUID assetId){return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from media_asset where id=:id and status='READY' and storage_key like 'private-evidence/%')",Map.of("id",assetId),Boolean.class));}
+    @Override public boolean privateReadyEvidence(UUID assetId,UUID studentId){return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from media_asset a join consent_evidence_upload e on e.asset_id=a.id where a.id=:id and e.student_id=:student and a.status='READY' and a.storage_key like 'private-evidence/%')",Map.of("id",assetId,"student",studentId),Boolean.class));}
     @Override public UUID insertConsent(UUID studentId,Policy policy,CollectConsent request,UUID actor,OffsetDateTime consentedAt){
         jdbc.update("update student_consent set status='EXPIRED',version=version+1 where student_id=:student and policy_type=:type and status='ACTIVE'",Map.of("student",studentId,"type",policy.type()));
         UUID id=UUID.randomUUID();LocalDate expires=policy.validDays()==null?null:consentedAt.atZoneSameInstant(STUDIO_ZONE).toLocalDate().plusDays(policy.validDays());

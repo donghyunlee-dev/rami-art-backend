@@ -34,7 +34,8 @@ public final class SupabaseDataTransferStorage implements DataTransferStorage {
         try {
             client.post().uri(uri(key)).contentType(MediaType.parseMediaType("text/csv"))
                     .header("apikey", serviceKey).header(HttpHeaders.AUTHORIZATION, "Bearer " + serviceKey)
-                    .header("x-upsert", "false").body(file).retrieve().toBodilessEntity();
+                    // A crashed worker may retry the same job-specific object with identical bytes.
+                    .header("x-upsert", "true").body(file).retrieve().toBodilessEntity();
         } catch (RuntimeException exception) { throw new StorageUnavailable(exception); }
     }
 

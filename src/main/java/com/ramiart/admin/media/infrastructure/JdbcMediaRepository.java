@@ -59,7 +59,7 @@ public class JdbcMediaRepository implements MediaRepository {
         return jdbc.sql("""
                         select id, storage_key, public_path, original_file_name, sha256, mime_type,
                                file_size, width, height, expires_at
-                          from media_asset where id=:id and status='READY'
+                          from media_asset where id=:id and status='READY' and storage_key not like 'private-evidence/%'
                         """)
                 .param("id", id).query((rs, ignored) -> new StoredAsset(
                         rs.getObject("id", UUID.class), rs.getString("storage_key"), rs.getString("public_path"),
@@ -88,7 +88,7 @@ public class JdbcMediaRepository implements MediaRepository {
         return jdbc.sql("""
                         select a.id, a.storage_key
                           from media_asset a
-                         where a.id=:id and a.status='READY'
+                         where a.id=:id and a.status='READY' and a.storage_key not like 'private-evidence/%'
                            and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)
                          for update
                         """)
@@ -108,7 +108,7 @@ public class JdbcMediaRepository implements MediaRepository {
     public List<UUID> findExpiredCandidateIds(Instant now, int limit) {
         return jdbc.sql("""
                         select a.id from media_asset a
-                         where a.expires_at < :now and a.status='READY'
+                         where a.expires_at < :now and a.status='READY' and a.storage_key not like 'private-evidence/%'
                            and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)
                          order by a.expires_at, a.id limit :limit
                         """)

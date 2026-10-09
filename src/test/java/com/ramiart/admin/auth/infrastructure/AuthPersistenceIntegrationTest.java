@@ -54,6 +54,41 @@ class AuthPersistenceIntegrationTest {
     @MockitoBean
     private DataTransferStorage dataTransferStorage;
 
+    @Autowired
+    private com.ramiart.admin.datatransfer.application.DataTransferService dataTransferService;
+
+    @Test
+    void retentionHttpContractRequiresSessionOriginAndSingleUseOwnerReauthentication() throws Exception {
+        createRoleUser("OWNER", "retention-http@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "retention-http@rami.local", TEMPORARY_PASSWORD, null, metadata("req_retention_login")).rawToken();
+        assertThat(http("GET", "/api/admin/retention/policies", null, null, null).statusCode()).isEqualTo(401);
+        var policies = http("GET", "/api/admin/retention/policies", cookie, null, null);
+        assertThat(policies.statusCode()).as(policies.body()).isEqualTo(200);
+        assertThat(policies.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        String previewBody = "{\"domain\":\"INQUIRY\",\"cutoffAt\":\"" + java.time.Instant.now() + "\"}";
+        assertThat(http("POST", "/api/admin/retention/previews", cookie, "https://untrusted.example", previewBody).statusCode()).isEqualTo(403);
+        var preview = http("POST", "/api/admin/retention/previews", cookie, "http://localhost:3000", previewBody);
+        assertThat(preview.statusCode()).as(preview.body()).isEqualTo(200);
+        String version = responseData(preview.body()).path("previewVersion").asText();
+        String runBody = "{\"previewVersion\":\"" + version + "\",\"confirmation\":\"파기 실행\"}";
+        assertThat(httpWithKey("POST", "/api/admin/retention/runs", cookie, runBody, UUID.randomUUID()).statusCode()).isEqualTo(403);
+        var reauth = http("POST", "/api/admin/auth/reauthentication", cookie, "http://localhost:3000",
+                "{\"password\":\"" + TEMPORARY_PASSWORD + "\",\"purpose\":\"RETENTION_EXECUTION\"}");
+        assertThat(reauth.statusCode()).as(reauth.body()).isEqualTo(200);
+        String token = responseData(reauth.body()).path("reauthToken").asText();
+        String approved = "{\"previewVersion\":\"" + version + "\",\"confirmation\":\"파기 실행\",\"reauthToken\":\"" + token + "\"}";
+        UUID key = UUID.randomUUID();
+        var accepted = httpWithKey("POST", "/api/admin/retention/runs", cookie, approved, key);
+        assertThat(accepted.statusCode()).as(accepted.body()).isEqualTo(202);
+        assertThat(httpWithKey("POST", "/api/admin/retention/runs", cookie, approved, key).statusCode()).isEqualTo(202);
+        var second = http("POST", "/api/admin/retention/previews", cookie, "http://localhost:3000",
+                "{\"domain\":\"TRANSFER_FILE\",\"cutoffAt\":\"" + java.time.Instant.now() + "\"}");
+        String secondBody = "{\"previewVersion\":\"" + responseData(second.body()).path("previewVersion").asText()
+                + "\",\"confirmation\":\"파기 실행\",\"reauthToken\":\"" + token + "\"}";
+        assertThat(httpWithKey("POST", "/api/admin/retention/runs", cookie, secondBody, UUID.randomUUID()).statusCode()).isEqualTo(403);
+    }
+
     private static final String OWNER_EMAIL = "owner@rami.local";
     private static final String TEMPORARY_PASSWORD = "LocalOnly!Change123";
     private static final EmbeddedPostgres POSTGRES = startPostgres();
@@ -704,9 +739,10 @@ class AuthPersistenceIntegrationTest {
 
         HttpResponse<String> response = multipart("/api/admin/data-transfer/imports", cookie,
                 "STUDENT", "STUDENT_V1", "students.csv", csv);
+        dataTransferService.processNext();
 
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
-        assertThat(response.body()).contains("READY", "totalCount", "validCount").doesNotContain("Minji", "01012345678", "private/");
+        assertThat(response.body()).contains("PARSING", "totalCount", "validCount").doesNotContain("Minji", "01012345678", "private/");
         assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where domain='STUDENT' and created_by=(select id from admin_user where email=?)",
                 Integer.class, "data-transfer-upload@rami.local")).isOne();
         assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_row r join data_transfer_job j on j.id=r.job_id where j.domain='STUDENT' and r.status='VALID' and r.payload_ciphertext is not null",
@@ -724,6 +760,7 @@ class AuthPersistenceIntegrationTest {
 
         HttpResponse<String> response = multipart("/api/admin/data-transfer/imports", cookie,
                 "STUDENT", "STUDENT_V1", "assignments.csv", csv);
+        dataTransferService.processNext();
 
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
         assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='assignments.csv')",
@@ -745,8 +782,10 @@ class AuthPersistenceIntegrationTest {
 
         HttpResponse<String> payment = multipart("/api/admin/data-transfer/imports", cookie,
                 "PAYMENT", "PAYMENT_V1", "missing-paid-on.csv", paymentCsv);
+        dataTransferService.processNext();
         HttpResponse<String> attendance = multipart("/api/admin/data-transfer/imports", cookie,
                 "ATTENDANCE", "ATTENDANCE_V1", "missing-absence-reason.csv", attendanceCsv);
+        dataTransferService.processNext();
 
         assertThat(payment.statusCode()).as(payment.body()).isEqualTo(201);
         assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='missing-paid-on.csv')",
@@ -790,6 +829,7 @@ class AuthPersistenceIntegrationTest {
         String csv = "attendanceSessionId,studentId,attendanceStatus\r\n" + session + "," + student + ",PRESENT\r\n";
         HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
                 "ATTENDANCE", "ATTENDANCE_V1", "attendance-confirm.csv", csv);
+        dataTransferService.processNext();
         UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where source_file_name='attendance-confirm.csv'", UUID.class);
         UUID rowId = jdbcTemplate.queryForObject("select id from data_transfer_row where job_id=?", UUID.class, jobId);
         String body = "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}";
@@ -833,6 +873,7 @@ class AuthPersistenceIntegrationTest {
                 + billing + ",," + month + "," + today + ",10000,TRANSFER,First installment\r\n";
         HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
                 "PAYMENT", "PAYMENT_V1", "payment-confirm.csv", csv);
+        dataTransferService.processNext();
         UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where source_file_name='payment-confirm.csv'", UUID.class);
         UUID rowId = jdbcTemplate.queryForObject("select id from data_transfer_row where job_id=?", UUID.class, jobId);
         String body = "{\"jobVersion\":1,\"rowIds\":[\"" + rowId + "\"],\"duplicateActions\":{}}";
@@ -880,7 +921,8 @@ class AuthPersistenceIntegrationTest {
 
         assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
         assertThat(replay.statusCode()).as(replay.body()).isEqualTo(201);
-        assertThat(created.body()).contains("COMPLETED", "downloadable");
+        assertThat(created.body()).contains("PROCESSING", "downloadable");
+        dataTransferService.processNext();
         assertThat(jdbcTemplate.queryForObject("select count(*) from data_transfer_job where direction='EXPORT' and domain='STUDENT'", Integer.class)).isOne();
         org.mockito.Mockito.verify(dataTransferStorage).upload(org.mockito.ArgumentMatchers.startsWith("data-transfers/"),
                 org.mockito.ArgumentMatchers.argThat(bytes -> new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
@@ -1076,8 +1118,10 @@ class AuthPersistenceIntegrationTest {
 
         HttpResponse<String> first = multipart("/api/admin/data-transfer/imports", cookie,
                 "ATTENDANCE", "ATTENDANCE_V1", "attendance.csv", csv);
+        dataTransferService.processNext();
         HttpResponse<String> duplicate = multipart("/api/admin/data-transfer/imports", cookie,
                 "ATTENDANCE", "ATTENDANCE_V1", "attendance.csv", csv);
+        dataTransferService.processNext();
 
         assertThat(first.statusCode()).as(first.body()).isEqualTo(201);
         assertThat(duplicate.statusCode()).isEqualTo(409);
@@ -1094,6 +1138,7 @@ class AuthPersistenceIntegrationTest {
                 + "Transfer Learner,2015-05-01,2023-03-01,Transfer Guardian,MOTHER,01033334444,,,\r\n";
         HttpResponse<String> upload = multipart("/api/admin/data-transfer/imports", cookie,
                 "STUDENT", "STUDENT_V1", "confirm.csv", csv);
+        dataTransferService.processNext();
         assertThat(upload.statusCode()).as(upload.body()).isEqualTo(201);
         UUID jobId = jdbcTemplate.queryForObject("select id from data_transfer_job where domain='STUDENT' and source_file_name='confirm.csv'",
                 UUID.class);
@@ -1116,6 +1161,7 @@ class AuthPersistenceIntegrationTest {
                 + "Transfer Learner,2015-05-01,2023-03-01,Transfer Guardian,MOTHER,01033334444,other@example.com,,\r\n";
         HttpResponse<String> duplicateUpload = multipart("/api/admin/data-transfer/imports", cookie,
                 "STUDENT", "STUDENT_V1", "duplicate-confirm.csv", duplicateCsv);
+        dataTransferService.processNext();
         assertThat(duplicateUpload.statusCode()).as(duplicateUpload.body()).isEqualTo(201);
         assertThat(jdbcTemplate.queryForObject("select status from data_transfer_row where job_id=(select id from data_transfer_job where source_file_name='duplicate-confirm.csv')",
                 String.class)).isEqualTo("DUPLICATE");

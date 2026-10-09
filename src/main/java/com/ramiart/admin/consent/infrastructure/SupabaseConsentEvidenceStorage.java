@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.util.UriUtils;
 
 @Component
@@ -24,6 +25,22 @@ public final class SupabaseConsentEvidenceStorage implements ConsentEvidenceStor
         this.client=builder.build();this.baseUrl=baseUrl==null?"":baseUrl.replaceAll("/+$","");this.serviceKey=serviceKey;this.bucket=bucket;
     }
 
+    @Override public void upload(String storageKey,byte[] bytes,String contentType){
+        check();
+        try{client.post().uri(objectUrl(storageKey)).contentType(MediaType.parseMediaType(contentType))
+                .header("apikey",serviceKey).header(HttpHeaders.AUTHORIZATION,"Bearer "+serviceKey)
+                .header("x-upsert","false").body(bytes).retrieve().toBodilessEntity();}
+        catch(RuntimeException e){throw new ConsentEvidenceStorageException();}
+    }
+    @Override public void delete(String storageKey){
+        check();
+        try{client.delete().uri(objectUrl(storageKey)).header("apikey",serviceKey)
+                .header(HttpHeaders.AUTHORIZATION,"Bearer "+serviceKey).retrieve().toBodilessEntity();}
+        catch(HttpClientErrorException.NotFound ignored){}
+        catch(RuntimeException e){throw new ConsentEvidenceStorageException();}
+    }
+    private void check(){if(!StringUtils.hasText(baseUrl)||!StringUtils.hasText(serviceKey)||!StringUtils.hasText(bucket))throw new ConsentEvidenceStorageException();}
+    private String objectUrl(String key){return baseUrl+"/storage/v1/object/"+UriUtils.encodePathSegment(bucket,StandardCharsets.UTF_8)+"/"+encodePath(key);}
     @Override public String signedUrl(String storageKey,int expiresInSeconds){
         if(!StringUtils.hasText(baseUrl)||!StringUtils.hasText(serviceKey)||!StringUtils.hasText(bucket)||expiresInSeconds<1||expiresInSeconds>300)throw new ConsentEvidenceStorageException();
         try{

@@ -29,6 +29,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
+import javax.sql.DataSource;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 
 @Service
 public class DataTransferService {
@@ -44,10 +46,11 @@ public class DataTransferService {
     private final DataTransferDomainWorker domainWorker;
     private final AuditRecorder audit;
     private final JdbcClient jdbc;
+    private final DataSource dataSource;
 
     public DataTransferService(DataTransferRepository repository, ObjectMapper mapper,
             DataTransferStorage storage, InquiryDataProtector protector, DataTransferStudentWorker studentWorker,
-            DataTransferDomainWorker domainWorker, AuditRecorder audit, JdbcClient jdbc) {
+            DataTransferDomainWorker domainWorker, AuditRecorder audit, JdbcClient jdbc, DataSource dataSource) {
         this.repository = repository;
         this.mapper = mapper;
         this.storage = storage;
@@ -56,6 +59,7 @@ public class DataTransferService {
         this.domainWorker = domainWorker;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.dataSource = dataSource;
     }
 
     public Template template(String domain, Authentication authentication) {
@@ -77,20 +81,6 @@ public class DataTransferService {
         byte[] bytes;
         try { bytes = file.getBytes(); }
         catch (java.io.IOException exception) { throw new DataTransferException("TRANSFER_FILE_INVALID"); }
-        String source;
-        try {
-            source = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
-        } catch (java.nio.charset.CharacterCodingException exception) {
-            throw new DataTransferException("TRANSFER_FILE_INVALID");
-        }
-        if (source.startsWith("\uFEFF")) source = source.substring(1);
-        List<List<String>> csv;
-        try { csv = DataTransferCsvParser.parse(source); }
-        catch (DataTransferCsvParser.CsvFormatException exception) { throw new DataTransferException("TRANSFER_FILE_INVALID"); }
-        List<String> headers = csv.getFirst();
-        List<String> expected = List.of(template.csv().stripTrailing().split(",", -1));
-        if (!headers.equals(expected) || csv.size() - 1 > 10_000) throw new DataTransferException("TRANSFER_FILE_INVALID");
         String hash = sha256(bytes);
         if (repository.hasActiveImport(normalized, hash)) throw new DataTransferException("TRANSFER_FILE_DUPLICATED");
         UUID id = UUID.randomUUID();
@@ -101,12 +91,8 @@ public class DataTransferService {
             storage.upload(key, bytes);
             uploaded = true;
             repository.createImport(id, normalized, template.version(), name, key, hash, bytes.length, actor);
-            List<ImportedRow> rows = importRows(id, normalized, headers, csv.subList(1, csv.size()));
-            repository.insertRows(id, rows);
-            int valid = (int) rows.stream().filter(row -> "VALID".equals(row.status())).count();
-            int invalid = (int) rows.stream().filter(row -> "INVALID".equals(row.status())).count();
-            int duplicates = (int) rows.stream().filter(row -> "DUPLICATE".equals(row.status())).count();
-            repository.markImportReady(id, rows.size(), valid, invalid, duplicates);
+            jdbc.sql("insert into data_transfer_work(job_id,payload_ciphertext) values(:id,:payload)")
+                    .param("id", id).param("payload", protector.protect(java.util.Base64.getEncoder().encodeToString(bytes))).update();
             return job(id, authentication);
         } catch (DataIntegrityViolationException exception) {
             if (uploaded) storage.delete(key);
@@ -391,7 +377,8 @@ public class DataTransferService {
                 && List.of("COMPLETED", "PARTIAL").contains(record.status());
         return new Job(record.id(), record.direction(), record.domain(), record.status(), record.templateVersion(),
                 record.totalCount(), record.validCount(), record.invalidCount(), record.duplicateCount(),
-                record.confirmedCount(), record.failedCount(), progress, record.version(), record.expiresAt(), downloadable);
+                record.confirmedCount(), record.failedCount(), progress, record.version(), record.expiresAt(), downloadable,
+                jdbc.sql("select error_code from data_transfer_work where job_id=:id").param("id",id).query(String.class).optional().orElse(null));
     }
 
     public RowPage rows(UUID id, List<String> requestedStatuses, String cursor, int size, Authentication authentication) {
@@ -466,20 +453,17 @@ public class DataTransferService {
         String previewSnapshot = protector.reveal((byte[]) preview[2]);
         if (!(rows.size() + ":" + exportRowsFingerprint(rows)).equals(previewSnapshot))
             throw new DataTransferException("TRANSFER_PREVIEW_STALE");
-        byte[] csv = renderCsv(definition.headers(), rows).getBytes(StandardCharsets.UTF_8);
-        if (csv.length > 20L * 1024 * 1024) throw new DataTransferException("TRANSFER_FILE_TOO_LARGE");
         UUID id = UUID.randomUUID();
         String key = "data-transfers/" + id + ".csv";
-        String hash = sha256(csv);
-        boolean uploaded = false;
+        String hash = sha256(id.toString().getBytes(StandardCharsets.UTF_8));
         try {
-            storage.upload(key, csv);
-            uploaded = true;
             jdbc.sql("insert into data_transfer_job(id,direction,domain,status,storage_key,sha256,file_size,filter_snapshot,purpose,total_count,valid_count,confirmed_count,expires_at,created_by) " +
-                    "values(:id,'EXPORT',:domain,'COMPLETED',:key,:hash,:size,cast(:filters as jsonb),:purpose,:count,:count,:count,statement_timestamp()+interval '24 hours',:actor)")
+                    "values(:id,'EXPORT',:domain,'PROCESSING',:key,:hash,1,cast(:filters as jsonb),:purpose,:count,:count,0,statement_timestamp()+interval '24 hours',:actor)")
                     .param("id", id).param("domain", domain).param("key", key).param("hash", hash)
-                    .param("size", csv.length).param("filters", mapper.writeValueAsString(request.filters()))
+                    .param("filters", mapper.writeValueAsString(request.filters()))
                     .param("purpose", request.purpose().trim()).param("count", rows.size()).param("actor", actor).update();
+            jdbc.sql("insert into data_transfer_work(job_id,payload_ciphertext) values(:id,:payload)")
+                    .param("id",id).param("payload",protector.protect(mapper.writeValueAsString(new ExportSnapshot(definition.headers(),rows)))).update();
             jdbc.sql("update idempotency_record set state='FAILED' where scope=:scope and idempotency_key=:key")
                     .param("scope", previewScope).param("key", request.previewToken()).update();
             jdbc.sql("update idempotency_record set state='COMPLETED',resource_id=:job,response_status=201 where scope=:scope and idempotency_key=:key")
@@ -489,7 +473,6 @@ public class DataTransferService {
                     null, null, Map.of("domain", request.domain(), "preset", request.preset(), "recordCount", rows.size())));
             return job(id, authentication);
         } catch (Exception exception) {
-            if (uploaded) storage.delete(key);
             if (exception instanceof DataTransferException transferException) throw transferException;
             throw new DataTransferException("TRANSFER_EXPORT_FAILED");
         }
@@ -510,6 +493,74 @@ public class DataTransferService {
         try { return new DownloadUrl(storage.createSignedUrl((String) record[0], expiresIn), Instant.now().plusSeconds(expiresIn)); }
         catch (RuntimeException exception) { throw new DataTransferException("TRANSFER_STORAGE_UNAVAILABLE"); }
     }
+
+    @Transactional
+    public boolean processNext() {
+        var work = jdbc.sql("select w.job_id,w.payload_ciphertext,w.attempts,j.direction,j.domain,j.storage_key " +
+                "from data_transfer_work w join data_transfer_job j on j.id=w.job_id where w.state='QUEUED' " +
+                "and j.expires_at>statement_timestamp() order by w.created_at,w.job_id limit 1 for update of w,j skip locked")
+                .query((r,n)->new QueuedWork(r.getObject(1,UUID.class),r.getBytes(2),r.getInt(3),r.getString(4),r.getString(5),r.getString(6))).optional();
+        if(work.isEmpty())return false;
+        QueuedWork item=work.get();var connection=DataSourceUtils.getConnection(dataSource);java.sql.Savepoint savepoint=null;
+        try {
+            savepoint=connection.setSavepoint();String payload=protector.reveal(item.payload());
+            if("IMPORT".equals(item.direction())){
+                byte[] bytes=java.util.Base64.getDecoder().decode(payload);String source;
+                try{source=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();}
+                catch(java.nio.charset.CharacterCodingException e){throw new DataTransferException("TRANSFER_FILE_INVALID");}
+                if(source.startsWith("\uFEFF"))source=source.substring(1);
+                List<List<String>> csv;try{csv=DataTransferCsvParser.parse(source);}
+                catch(DataTransferCsvParser.CsvFormatException e){throw new DataTransferException("TRANSFER_FILE_INVALID");}
+                if(csv.isEmpty()||!csv.getFirst().equals(List.of(TEMPLATES.get(item.domain()).stripTrailing().split(",",-1)))
+                        ||csv.size()-1>10000)throw new DataTransferException("TRANSFER_FILE_INVALID");
+                List<ImportedRow> rows=importRows(item.id(),item.domain(),csv.getFirst(),csv.subList(1,csv.size()));
+                repository.insertRows(item.id(),rows);
+                repository.markImportReady(item.id(),rows.size(),(int)rows.stream().filter(r->"VALID".equals(r.status())).count(),
+                        (int)rows.stream().filter(r->"INVALID".equals(r.status())).count(),(int)rows.stream().filter(r->"DUPLICATE".equals(r.status())).count());
+            }else{
+                ExportSnapshot snapshot=mapper.readValue(payload,ExportSnapshot.class);
+                byte[] csv=renderCsv(snapshot.headers(),snapshot.rows()).getBytes(StandardCharsets.UTF_8);
+                if(csv.length>20L*1024*1024)throw new DataTransferException("TRANSFER_FILE_TOO_LARGE");
+                storage.upload(item.storageKey(),csv);
+                jdbc.sql("update data_transfer_job set status='COMPLETED',sha256=:hash,file_size=:size,confirmed_count=total_count,version=version+1 where id=:id")
+                        .param("hash",sha256(csv)).param("size",csv.length).param("id",item.id()).update();
+            }
+            jdbc.sql("update data_transfer_work set state='COMPLETED',payload_ciphertext=null,error_code=null,attempts=attempts+1 where job_id=:id")
+                    .param("id",item.id()).update();connection.releaseSavepoint(savepoint);
+        }catch(Exception e){
+            try{if(savepoint!=null)connection.rollback(savepoint);}catch(java.sql.SQLException rollback){throw new IllegalStateException("Transfer worker rollback failed",rollback);}
+            String code=e instanceof DataTransferException x?x.code():"TRANSFER_WORK_FAILED";
+            boolean terminal=e instanceof DataTransferException||item.attempts()+1>=5;
+            jdbc.sql("update data_transfer_work set attempts=attempts+1,error_code=:code,state=:state,payload_ciphertext=case when :terminal then null else payload_ciphertext end where job_id=:id")
+                    .param("code",code).param("state",terminal?"FAILED":"QUEUED").param("terminal",terminal).param("id",item.id()).update();
+            if(terminal)jdbc.sql("update data_transfer_job set status='FAILED',version=version+1 where id=:id").param("id",item.id()).update();
+            org.slf4j.LoggerFactory.getLogger(DataTransferService.class).warn("Transfer worker attempt failed: jobId={}, code={}, terminal={}",item.id(),code,terminal);
+        }finally{DataSourceUtils.releaseConnection(connection,dataSource);}
+        return true;
+    }
+
+    @Transactional
+    public int cleanupExpired() {
+        jdbc.sql("select pg_advisory_xact_lock(hashtext('retention-governance'))").query((r,n)->true).single();
+        List<UUID> jobs=jdbc.sql("select j.id from data_transfer_job j where j.expires_at<=statement_timestamp() and j.status<>'EXPIRED' " +
+                "and not exists(select 1 from retention_hold h where h.target_type='DATA_TRANSFER_JOB' and h.target_id=j.id " +
+                "and h.status='ACTIVE' and h.starts_at<=statement_timestamp() and (h.ends_at is null or h.ends_at>statement_timestamp())) " +
+                "order by j.expires_at,j.id limit 100 for update of j skip locked").query(UUID.class).list();
+        var connection=DataSourceUtils.getConnection(dataSource);int removed=0;
+        try{for(UUID id:jobs){java.sql.Savepoint point=connection.setSavepoint();
+            try{
+                String key=jdbc.sql("select storage_key from data_transfer_job where id=:id").param("id",id).query(String.class).single();storage.delete(key);
+                jdbc.sql("update data_transfer_job set status='EXPIRED',version=version+1,sha256=repeat('0',64),source_file_name=case when direction='IMPORT' then 'EXPIRED.csv' else null end where id=:id").param("id",id).update();
+                jdbc.sql("update data_transfer_row set payload_ciphertext=null,dedup_hash=repeat('0',64),masked_summary='EXPIRED' where job_id=:id").param("id",id).update();
+                jdbc.sql("update data_transfer_work set state='EXPIRED',payload_ciphertext=null where job_id=:id").param("id",id).update();
+                connection.releaseSavepoint(point);removed++;
+            }catch(RuntimeException e){connection.rollback(point);org.slf4j.LoggerFactory.getLogger(DataTransferService.class).warn("Transfer expiry cleanup failed: jobId={}",id);}
+        }}catch(java.sql.SQLException e){throw new IllegalStateException("Transfer expiry transaction failed",e);}
+        finally{DataSourceUtils.releaseConnection(connection,dataSource);}
+        return removed;
+    }
+    private record QueuedWork(UUID id,byte[] payload,int attempts,String direction,String domain,String storageKey){}
 
     private ExportDefinition exportDefinition(ExportRequest request) {
         if (request == null || request.domain() == null || request.preset() == null || request.filters() == null
@@ -649,6 +700,7 @@ public class DataTransferService {
     public record ExportRequest(String domain, String preset, Map<String, String> filters, String purpose, UUID previewToken) {}
     public record ExportPreview(List<String> fields, int candidateCount, UUID previewToken, Instant expiresAt) {}
     public record DownloadUrl(String url, Instant expiresAt) {}
+    private record ExportSnapshot(List<String> headers,List<Map<String,String>> rows) {}
     private record ExportDefinition(List<String> headers, List<String> fields) {}
     public record ConfirmRequest(int jobVersion, List<UUID> rowIds, Map<UUID, String> duplicateActions) {}
     public record RequestMetadata(String requestId, String ipAddress, String userAgent) {}
