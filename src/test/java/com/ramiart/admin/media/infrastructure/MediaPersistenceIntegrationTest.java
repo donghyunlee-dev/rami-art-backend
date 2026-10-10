@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
 import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.ramiart.admin.consent.infrastructure.JdbcConsentRepository;
 import com.ramiart.admin.media.application.MediaException;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaService;
@@ -50,12 +51,14 @@ class MediaPersistenceIntegrationTest {
 
     @Autowired DataSource dataSource;
     @Autowired MediaService service;
+    @Autowired JdbcMediaRepository repository;
+    @Autowired JdbcConsentRepository consentRepository;
     @Autowired InMemoryStorage storage;
     JdbcTemplate jdbc;
 
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @Import({MediaService.class, JdbcMediaRepository.class, SecureImageValidator.class, JdbcAuditRecorder.class})
+    @Import({MediaService.class, JdbcMediaRepository.class, JdbcConsentRepository.class, SecureImageValidator.class, JdbcAuditRecorder.class})
     static class TestConfiguration {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean InMemoryStorage storage() { return new InMemoryStorage(); }
@@ -132,6 +135,69 @@ class MediaPersistenceIntegrationTest {
         service.delete(asset.id(), actor, deleteKey, metadata());
         assertThat(storage.objects).isEmpty();
         assertThat(jdbc.queryForObject("select count(*) from media_asset where id=?", Integer.class, asset.id())).isZero();
+    }
+
+    @Test
+    void referencesShowCurrentPublicContentAndKeepPrivateOwnersOutOfResults() throws Exception {
+        UUID actor = actor();
+        var asset = service.upload(png(12, 12), "artwork.png", "image/png", actor, UUID.randomUUID(), metadata());
+        UUID revisionId = UUID.randomUUID();
+        UUID artworkId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        jdbc.update("insert into course(id,code,name,created_by,updated_by) values(?,?,'작품 공개 테스트 과정',?,?)",
+                courseId, "TEST_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(), actor, actor);
+        jdbc.update("""
+                insert into gallery_artwork(id,artwork_id,revision,status,visible,title,course_id,audience_label,medium,
+                    description,media_asset_id,alt_text,consent_exemption_reason,created_by,published_by,published_at)
+                values (?, ?, 1, 'PUBLISHED', true, '수채화', ?, '초등', '수채화', '색을 관찰한 작품', ?, '푸른색과 노란색이 겹친 그림', '이전 동의 기록 확인 완료', ?, ?, statement_timestamp())
+                """, revisionId, artworkId, courseId, asset.id(), actor, actor);
+        jdbc.update("insert into media_asset_reference(asset_id,owner_type,owner_id,field_name,reference_state) values(?,'GALLERY_ARTWORK',?,'artworkImage','PUBLISHED')",
+                asset.id(), revisionId);
+        jdbc.update("insert into media_asset_reference(asset_id,owner_type,owner_id,field_name,reference_state) values(?,'STUDENT_LESSON_RECORD',?,'artwork','PRIVATE')",
+                asset.id(), UUID.randomUUID());
+
+        var references = repository.references(asset.id());
+
+        assertThat(references).hasSize(1);
+        assertThat(references.getFirst().ownerType()).isEqualTo("GALLERY_ARTWORK");
+        assertThat(references.getFirst().targetId()).isEqualTo(artworkId);
+        assertThat(references.getFirst().revisionId()).isEqualTo(revisionId);
+        assertThat(references.getFirst().title()).isEqualTo("수채화");
+        assertThat(references.getFirst().publicState()).isEqualTo("PUBLIC");
+        assertThat(references.getFirst().currentlyPublic()).isTrue();
+    }
+
+    @Test
+    void consentImpactLookupRetainsPublishedArtworkAfterRevocation() throws Exception {
+        UUID actor = actor();
+        var asset = service.upload(png(12, 12), "consented-artwork.png", "image/png", actor, UUID.randomUUID(), metadata());
+        UUID studentId = UUID.randomUUID();
+        UUID guardianId = UUID.randomUUID();
+        UUID policyId = UUID.randomUUID();
+        UUID consentId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        UUID revisionId = UUID.randomUUID();
+        UUID artworkId = UUID.randomUUID();
+        jdbc.update("insert into student(id,student_name,student_name_search,joined_at,created_by,updated_by) values(?, '김학생', '김학생', current_date, ?, ?)", studentId, actor, actor);
+        jdbc.update("insert into guardian_contact(id,student_id,name,relationship,phone_ciphertext,phone_hash,phone_last4,primary_contact,display_order) values(?,?, '보호자', 'MOTHER', ?, ?, '1234', true, 0)", guardianId, studentId, new byte[]{1, 2, 3}, "a".repeat(64));
+        jdbc.update("insert into consent_policy(id,type,revision,status,title,body,created_by,published_by,published_at) values(?, 'MEDIA_PUBLICATION', 1, 'PUBLISHED', '작품 공개', '작품 공개 동의 문안', ?, ?, statement_timestamp())", policyId, actor, actor);
+        jdbc.update("insert into student_consent(id,student_id,consent_policy_id,policy_type,guardian_contact_id,method,status,consented_at,created_by) values(?,?,?,'MEDIA_PUBLICATION',?,'PAPER','ACTIVE',statement_timestamp(),?)", consentId, studentId, policyId, guardianId, actor);
+        jdbc.update("insert into course(id,code,name,created_by,updated_by) values(?,?,'동의 영향 테스트 과정',?,?)", courseId, "CONSENT_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(), actor, actor);
+        jdbc.update("""
+                insert into gallery_artwork(id,artwork_id,revision,status,visible,title,course_id,audience_label,medium,
+                    description,media_asset_id,alt_text,student_consent_id,created_by,published_by,published_at)
+                values (?, ?, 1, 'PUBLISHED', true, '동의 작품', ?, '초등', '수채화', '작품 설명', ?, '파란색과 붉은색이 겹친 그림', ?, ?, ?, statement_timestamp())
+                """, revisionId, artworkId, courseId, asset.id(), consentId, actor, actor);
+
+        var before = consentRepository.publicArtworkReferences(consentId);
+        jdbc.update("update student_consent set status='REVOKED',revoked_at=statement_timestamp(),revoked_by=?,revoke_reason='보호자 요청에 따른 철회' where id=?", actor, consentId);
+        var after = consentRepository.publicArtworkReferences(consentId);
+
+        assertThat(before).hasSize(1);
+        assertThat(before.getFirst().currentlyPublic()).isTrue();
+        assertThat(before.getFirst().artworkId()).isEqualTo(artworkId);
+        assertThat(after).hasSize(1);
+        assertThat(after.getFirst().currentlyPublic()).isFalse();
     }
 
     @Test

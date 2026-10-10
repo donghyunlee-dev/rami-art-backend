@@ -25,7 +25,7 @@ public final class GalleryArtworkModels {
     public record DraftSummary(int revision,boolean publishable,Instant updatedAt,boolean featured) {}
     public record Page(List<ListItem> items,PageInfo page) {}
     public record PageInfo(int number,int size,long totalElements,int totalPages) {}
-    public record Consent(String id,String maskedStudentLabel,String courseName,int policyRevision,Instant consentedAt,Instant expiresAt,String status) {}
+    public record Consent(String id,String maskedStudentLabel,String courseName,int policyRevision,Instant consentedAt,Instant expiresAt,String status,long version) {}
     public record ConsentPage(List<Consent> items) {}
     public record Placement(String placement,String title,String imageUrl,String description,String altText) {}
     public record Preview(List<Placement> placements,UUID artworkId,long draftVersion) {}

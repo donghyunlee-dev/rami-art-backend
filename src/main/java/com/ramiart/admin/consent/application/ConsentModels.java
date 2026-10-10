@@ -15,6 +15,8 @@ public final class ConsentModels {
     public record StudentConsent(UUID id,String type,UUID policyId,int revision,String status,String method,
             UUID guardianContactId,OffsetDateTime consentedAt,LocalDate expiresOn,UUID evidenceAssetId,long version){}
     public record Uses(int publicArtworkCount,int queuedOptionalNotificationCount){}
+    public record PublicArtworkReference(UUID artworkId,UUID revisionId,int revision,String title,
+            UUID mediaAssetId,String altText,boolean currentlyPublic){}
     public record ConsentTypeStatus(String type,Policy currentPolicy,StudentConsent currentConsent,String status,
             LocalDate expiresOn,Uses uses,List<String> actions){}
     public record StudentConsents(UUID studentId,List<ConsentTypeStatus> items){}

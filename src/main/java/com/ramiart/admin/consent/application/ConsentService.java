@@ -97,6 +97,13 @@ public class ConsentService {
         StudentConsent result=repository.consent(id).orElseThrow(()->new ConsentException("CONSENT_NOT_FOUND"));event(actor,metadata,"STUDENT_CONSENT_REVOKED","STUDENT_CONSENT",id,Map.of("policyType",before.type()));return result;
     }
 
+    @Transactional(readOnly=true)
+    public List<PublicArtworkReference> publicArtworkReferences(UUID consentId,org.springframework.security.core.Authentication auth) {
+        require(auth,"CONSENT_READ");
+        if(repository.consent(consentId).isEmpty())throw new ConsentException("CONSENT_NOT_FOUND");
+        return repository.publicArtworkReferences(consentId);
+    }
+
     public int expire(int limit){return repository.expireConsents(Math.min(Math.max(limit,1),500));}
 
     private void validate(String type,PolicyDraft draft){try{ConsentPolicyValidator.validate(type,draft==null?null:new ConsentPolicyValidator.PolicyDraft(draft.title(),draft.body(),draft.required(),draft.validDays(),draft.evidenceRequired()));}catch(IllegalArgumentException exception){throw new ConsentException(exception.getMessage());}}

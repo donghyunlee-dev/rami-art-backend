@@ -3,6 +3,7 @@ package com.ramiart.admin.media.api;
 import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.media.application.MediaModels.MediaAsset;
+import com.ramiart.admin.media.application.MediaModels.AssetReference;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -47,6 +49,13 @@ public final class MediaController {
             HttpServletRequest request) {
         service.delete(assetId, UUID.fromString(authentication.getName()), idempotencyKey, metadata(request));
         return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+    }
+
+    @GetMapping("/{assetId}/references")
+    ResponseEntity<ApiEnvelope<java.util.List<AssetReference>>> references(@PathVariable UUID assetId,
+            Authentication authentication, HttpServletRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiEnvelope.success(service.references(assetId, authentication), RequestIdFilter.get(request)));
     }
 
     private static RequestMetadata metadata(HttpServletRequest request) {

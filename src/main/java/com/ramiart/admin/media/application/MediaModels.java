@@ -19,6 +19,10 @@ public final class MediaModels {
             String sha256, String mimeType, long fileSize, int width, int height, Instant expiresAt) {
     }
 
+    public record AssetReference(String ownerType, UUID targetId, UUID revisionId, String fieldName,
+            String referenceState, String title, String publicState, boolean currentlyPublic) {
+    }
+
     public record RequestMetadata(String requestId, String ipAddress, String userAgent) {
     }
 }

@@ -3,6 +3,7 @@ package com.ramiart.admin.media.application;
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
 import com.ramiart.admin.media.application.MediaModels.MediaAsset;
+import com.ramiart.admin.media.application.MediaModels.AssetReference;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaModels.StoredAsset;
 import com.ramiart.admin.media.application.MediaModels.ValidatedImage;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.Authentication;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -100,6 +102,12 @@ public final class MediaService {
         });
     }
 
+    public java.util.List<AssetReference> references(UUID assetId, Authentication authentication) {
+        require(authentication, "MEDIA_WRITE");
+        if (repository.find(assetId).isEmpty()) throw new MediaException("MEDIA_ASSET_NOT_FOUND");
+        return repository.references(assetId);
+    }
+
     public int cleanupExpired(int limit) {
         if (limit < 1 || limit > 500) throw new IllegalArgumentException("limit must be between 1 and 500");
         int removed = 0;
@@ -155,5 +163,14 @@ public final class MediaService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    private static UUID require(Authentication authentication, String permission) {
+        if (authentication == null || authentication.getAuthorities().stream()
+                .noneMatch(authority -> permission.equals(authority.getAuthority()))) {
+            throw new MediaException(permission + "_DENIED");
+        }
+        try { return UUID.fromString(authentication.getName()); }
+        catch (IllegalArgumentException exception) { throw new MediaException(permission + "_DENIED"); }
     }
 }

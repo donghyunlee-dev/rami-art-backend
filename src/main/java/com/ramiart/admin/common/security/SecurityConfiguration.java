@@ -111,7 +111,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/admin/financial-imports/*/confirmations")
                                 .hasAuthority("FINANCE_IMPORT")
                         .requestMatchers(HttpMethod.GET, "/api/admin/consent-policies", "/api/admin/students/*/consents",
-                                "/api/admin/student-consents/*/evidence-url")
+                                "/api/admin/student-consents/*/evidence-url", "/api/admin/student-consents/*/public-artworks")
                                 .hasAuthority("CONSENT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/consent-policies/*/draft",
                                 "/api/admin/consent-policies/draft/*/publish", "/api/admin/students/*/consents",
@@ -238,6 +238,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.PUT, "/api/admin/staff/**")
                                 .hasAuthority("STAFF_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/media-assets")
+                                .hasAuthority("MEDIA_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/media-assets/*/references")
                                 .hasAuthority("MEDIA_WRITE")
                         .requestMatchers(HttpMethod.DELETE, "/api/admin/media-assets/*")
                                 .hasAuthority("MEDIA_WRITE")

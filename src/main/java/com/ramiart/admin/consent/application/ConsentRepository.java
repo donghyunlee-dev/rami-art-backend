@@ -20,6 +20,7 @@ public interface ConsentRepository {
     boolean privateReadyEvidence(UUID assetId,UUID studentId);
     UUID insertConsent(UUID studentId,Policy policy,CollectConsent request,UUID actor,OffsetDateTime consentedAt);
     Optional<StudentConsent> consent(UUID id);
+    List<PublicArtworkReference> publicArtworkReferences(UUID consentId);
     boolean revoke(UUID id,long version,String reason,UUID actor);
     int expireConsents(int limit);
     Optional<String> privateEvidenceStorageKey(UUID consentId);

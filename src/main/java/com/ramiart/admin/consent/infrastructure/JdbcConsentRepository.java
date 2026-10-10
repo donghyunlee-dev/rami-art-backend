@@ -90,6 +90,13 @@ public class JdbcConsentRepository implements ConsentRepository {
         return id;
     }
     @Override public Optional<StudentConsent> consent(UUID id){return jdbc.query("select c.*,p.revision from student_consent c join consent_policy p on p.id=c.consent_policy_id where c.id=:id",Map.of("id",id),(r,n)->new StudentConsent(r.getObject("id",UUID.class),r.getString("policy_type"),r.getObject("consent_policy_id",UUID.class),r.getInt("revision"),r.getString("status"),r.getString("method"),r.getObject("guardian_contact_id",UUID.class),r.getObject("consented_at",OffsetDateTime.class),r.getObject("expires_on",LocalDate.class),r.getObject("evidence_asset_id",UUID.class),r.getLong("version"))).stream().findFirst();}
+    @Override public List<PublicArtworkReference> publicArtworkReferences(UUID consentId){return jdbc.query("""
+            select g.artwork_id,g.id revision_id,g.revision,g.title,g.media_asset_id,g.alt_text,
+                   (c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date)) currently_public
+              from gallery_artwork g join student_consent c on c.id=g.student_consent_id
+             where c.id=:id and g.status='PUBLISHED' and g.visible
+             order by g.published_at desc,g.artwork_id
+            """,Map.of("id",consentId),(r,n)->new PublicArtworkReference(r.getObject("artwork_id",UUID.class),r.getObject("revision_id",UUID.class),r.getInt("revision"),r.getString("title"),r.getObject("media_asset_id",UUID.class),r.getString("alt_text"),r.getBoolean("currently_public")));}
     @Override public boolean revoke(UUID id,long version,String reason,UUID actor){
         int changed=jdbc.update("update student_consent set status='REVOKED',revoked_at=statement_timestamp(),revoked_by=:actor,revoke_reason=:reason,version=version+1 where id=:id and version=:version and status='ACTIVE'",Map.of("id",id,"version",version,"reason",reason,"actor",actor));
         if(changed!=1)return false;

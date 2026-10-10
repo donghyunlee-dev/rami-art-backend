@@ -40,6 +40,7 @@ public final class MediaExceptionHandler {
 
     private static Definition definition(String code) {
         return switch (code) {
+            case "MEDIA_WRITE_DENIED" -> new Definition(HttpStatus.FORBIDDEN, "이미지 사용처 조회 권한이 없습니다.");
             case "MEDIA_FILE_REQUIRED" -> new Definition(HttpStatus.BAD_REQUEST, "이미지를 선택해 주세요.");
             case "MEDIA_FILE_TOO_LARGE" -> new Definition(HttpStatus.PAYLOAD_TOO_LARGE, "이미지는 10MB 이하여야 합니다.");
             case "MEDIA_TYPE_NOT_SUPPORTED" -> new Definition(HttpStatus.UNSUPPORTED_MEDIA_TYPE,

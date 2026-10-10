@@ -60,6 +60,9 @@ public final class ConsentController {
     @PostMapping("/student-consents/{id}/revocation")
     ResponseEntity<ApiEnvelope<StudentConsent>> revoke(@PathVariable UUID id,@RequestBody RevokeRequest body,@RequestHeader("Idempotency-Key")UUID key,Authentication auth,HttpServletRequest request){return ok(service.revoke(id,body,key,auth,metadata(request)),request);}
 
+    @GetMapping("/student-consents/{id}/public-artworks")
+    ResponseEntity<ApiEnvelope<List<PublicArtworkReference>>> publicArtworks(@PathVariable UUID id,Authentication auth,HttpServletRequest request){return ok(service.publicArtworkReferences(id,auth),request);}
+
     @GetMapping("/student-consents/{id}/evidence-url")
     ResponseEntity<ApiEnvelope<EvidenceUrl>> evidenceUrl(@PathVariable UUID id,Authentication auth,HttpServletRequest request){return ok(service.evidenceUrl(id,auth),request);}
 

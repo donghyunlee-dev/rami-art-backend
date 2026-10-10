@@ -1,6 +1,7 @@
 package com.ramiart.admin.media.application;
 
 import com.ramiart.admin.media.application.MediaModels.StoredAsset;
+import com.ramiart.admin.media.application.MediaModels.AssetReference;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +19,8 @@ public interface MediaRepository {
     void complete(String scope, UUID key, UUID resourceId, int status);
 
     Optional<StoredAsset> find(UUID id);
+
+    List<AssetReference> references(UUID id);
 
     void insert(StoredAsset asset, UUID actorId);
 
