@@ -18,7 +18,7 @@ public class JdbcStudentRepository implements StudentRepository {
     private final JdbcClient jdbc;
     public JdbcStudentRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
-    public StudentPage findStudents(String keyword, List<String> statuses, LocalDate from, LocalDate to,
+    public StudentPage findStudents(String keyword, String className, List<String> statuses, LocalDate from, LocalDate to,
             String birthdayFrom, String birthdayTo, int page, int size, String sort) {
         String order = switch (sort) {
             case "studentName,desc" -> "s.student_name_search desc, s.id asc";
@@ -31,6 +31,10 @@ public class JdbcStudentRepository implements StudentRepository {
         StringBuilder where = new StringBuilder(" where s.status in (:statuses)");
         Map<String,Object> params = new HashMap<>(); params.put("statuses", statuses);
         if (keyword != null) { where.append(" and (s.student_name ilike :keyword or s.school_name ilike :keyword)"); params.put("keyword", "%" + keyword + "%"); }
+        if (className != null) {
+            where.append(" and exists (select 1 from student_schedule_assignment a join schedule_slot ss on ss.id=a.schedule_slot_id join class_group g on g.id=ss.class_group_id where a.student_id=s.id and current_date between a.effective_from and coalesce(a.effective_to,'infinity'::date) and g.name ilike :class_name)");
+            params.put("class_name", "%" + className + "%");
+        }
         if (from != null) { where.append(" and s.joined_at >= :joined_from"); params.put("joined_from", from); }
         if (to != null) { where.append(" and s.joined_at <= :joined_to"); params.put("joined_to", to); }
         if (birthdayFrom != null) {
@@ -50,7 +54,8 @@ public class JdbcStudentRepository implements StudentRepository {
         List<StudentSummary> items = query(sql, params).query(this::summary).list();
         int pages = total == 0 ? 0 : (int) ((total + size - 1) / size);
         return new StudentPage(items, new PageInfo(page,size,total,pages,page==0,page+1>=pages),
-                Map.of("keyword", keyword == null ? "" : keyword, "statuses", statuses, "sort", sort));
+                Map.of("keyword", keyword == null ? "" : keyword, "className", className == null ? "" : className,
+                        "statuses", statuses, "sort", sort));
     }
 
     public Optional<StudentRecord> findStudent(UUID id) {

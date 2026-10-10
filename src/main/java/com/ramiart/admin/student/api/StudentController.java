@@ -21,11 +21,12 @@ public final class StudentController {
 
     @GetMapping("/students")
     ResponseEntity<ApiEnvelope<StudentPage>> list(@RequestParam(required=false)String keyword,
+            @RequestParam(required=false)String className,
             @RequestParam(required=false)String statuses,@RequestParam(required=false)LocalDate joinedFrom,
             @RequestParam(required=false)LocalDate joinedTo,@RequestParam(required=false)String birthdayFrom,
             @RequestParam(required=false)String birthdayTo,@RequestParam(defaultValue="0")int page,
             @RequestParam(defaultValue="20")int size,@RequestParam(defaultValue="studentName,asc")String sort,
-            HttpServletRequest request){return ok(service.list(keyword,statuses,joinedFrom,joinedTo,birthdayFrom,birthdayTo,page,size,sort),request);}
+            HttpServletRequest request){return ok(service.list(keyword,className,statuses,joinedFrom,joinedTo,birthdayFrom,birthdayTo,page,size,sort),request);}
     @GetMapping("/students/{id}") ResponseEntity<ApiEnvelope<StudentDetail>> detail(@PathVariable UUID id,HttpServletRequest request){return ok(service.detail(id),request);}
     @PostMapping("/students") ResponseEntity<ApiEnvelope<StudentDetail>> create(@RequestHeader("Idempotency-Key")UUID key,@RequestBody StudentCreate body,Authentication auth,HttpServletRequest request){StudentDetail data=service.create(body,actor(auth),key,meta(request));return ResponseEntity.status(201).header(HttpHeaders.LOCATION,"/admin/students/"+data.id()).cacheControl(CacheControl.noStore()).body(ApiEnvelope.success(data,RequestIdFilter.get(request)));}
     @PutMapping("/students/{id}") ResponseEntity<ApiEnvelope<StudentDetail>> update(@PathVariable UUID id,@RequestHeader("Idempotency-Key")UUID key,@RequestBody StudentUpdate body,Authentication auth,HttpServletRequest request){return ok(service.update(id,body,actor(auth),key,meta(request)),request);}

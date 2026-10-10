@@ -159,6 +159,32 @@ class StudentPersistenceIntegrationTest {
                 Integer.class)).isEqualTo(3);
     }
 
+    @Test
+    void listCanFilterByCurrentlyAssignedClassName() {
+        UUID actor = actor();
+        var student = service.create(createCommand("윤하늘", "010-3333-4444"), actor,
+                UUID.randomUUID(), metadata("student-class-filter-create"));
+        UUID course = UUID.randomUUID();
+        UUID group = UUID.randomUUID();
+        UUID slot = UUID.randomUUID();
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        jdbc.update("insert into course(id,code,name,display_order,created_by,updated_by) values(?,?,?,?,?,?)",
+                course, "STU_" + course.toString().substring(0, 8).toUpperCase(), "초등 과정",
+                Math.floorMod(course.hashCode(), 100000), actor, actor);
+        jdbc.update("insert into class_group(id,course_id,code,name,room_code,capacity,starts_on,status,created_by,updated_by) values(?,?,?,?,?,10,?,'ACTIVE',?,?)",
+                group, course, "CLS_" + group.toString().substring(0, 8).toUpperCase(), "초등 A반", "ROOM_A", today.minusDays(30), actor, actor);
+        jdbc.update("insert into schedule_slot(id,class_group_id,created_by) values(?,?,?)", slot, group, actor);
+        jdbc.update("insert into student_schedule_assignment(id,student_id,schedule_slot_id,effective_from,created_by,updated_by) values(?,?,?,?,?,?)",
+                UUID.randomUUID(), student.id(), slot, today.minusDays(10), actor, actor);
+
+        var matching = service.list(null, "초등 A반", null, null, null, null, null, 0, 20, "studentName,asc");
+        var nonMatching = service.list(null, "중등 B반", null, null, null, null, null, 0, 20, "studentName,asc");
+
+        assertThat(matching.items()).extracting("id").contains(student.id());
+        assertThat(matching.applied()).containsEntry("className", "초등 A반");
+        assertThat(nonMatching.items()).extracting("id").doesNotContain(student.id());
+    }
+
     private static StudentCreate createCommand(String name, String phone) {
         return new StudentCreate(name, LocalDate.now().minusYears(8), "별빛학교", LocalDate.now(), false,
                 List.of(new GuardianWrite(null, "김보호", "MOTHER", null, phone, null,

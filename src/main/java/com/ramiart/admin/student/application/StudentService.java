@@ -25,13 +25,14 @@ public class StudentService {
     public StudentService(StudentRepository repository,StudentDataProtector protector,AuditRecorder audit,Clock clock){this.repository=repository;this.protector=protector;this.audit=audit;this.clock=clock;}
 
     @Transactional(readOnly=true)
-    public StudentPage list(String keyword,String statuses,LocalDate from,LocalDate to,String birthdayFrom,String birthdayTo,int page,int size,String sort){
+    public StudentPage list(String keyword,String className,String statuses,LocalDate from,LocalDate to,String birthdayFrom,String birthdayTo,int page,int size,String sort){
         String k=trim(keyword); if(k!=null&&(k.length()<2||k.length()>50)) fail("INVALID_STUDENT_QUERY");
+        String classFilter=trim(className); if(classFilter!=null&&(classFilter.length()<2||classFilter.length()>50)) fail("INVALID_STUDENT_QUERY");
         List<String> ss=statuses==null||statuses.isBlank()?List.of("ACTIVE","PAUSED"):Arrays.stream(statuses.split(",")).map(String::trim).distinct().toList();
         if(ss.isEmpty()||ss.stream().anyMatch(s->!STATUSES.contains(s))||page<0||!Set.of(10,20,50).contains(size)||!Set.of("studentName,asc","studentName,desc","joinedAt,asc","joinedAt,desc","updatedAt,asc","updatedAt,desc").contains(sort)) fail("INVALID_STUDENT_QUERY");
         if(from!=null&&to!=null&&(from.isAfter(to)||from.plusYears(5).isBefore(to))) fail("INVALID_STUDENT_QUERY");
         if((birthdayFrom==null)!=(birthdayTo==null)||(birthdayFrom!=null&&(!mmdd(birthdayFrom)||!mmdd(birthdayTo)))) fail("INVALID_STUDENT_QUERY");
-        return repository.findStudents(k,ss,from,to,birthdayFrom,birthdayTo,page,size,sort);
+        return repository.findStudents(k,classFilter,ss,from,to,birthdayFrom,birthdayTo,page,size,sort);
     }
     @Transactional(readOnly=true) public StudentDetail detail(UUID id){return toDetail(record(id));}
     @Transactional(readOnly=true)

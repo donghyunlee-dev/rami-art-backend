@@ -17,7 +17,7 @@ public interface StudentRepository {
             Instant createdAt, Instant updatedAt, long version) {}
     record Claim(boolean claimed, UUID resourceId) {}
 
-    StudentPage findStudents(String keyword, List<String> statuses, LocalDate joinedFrom, LocalDate joinedTo,
+    StudentPage findStudents(String keyword, String className, List<String> statuses, LocalDate joinedFrom, LocalDate joinedTo,
             String birthdayFrom, String birthdayTo, int page, int size, String sort);
     Optional<StudentRecord> findStudent(UUID id);
     int lessonCount(UUID studentId);
