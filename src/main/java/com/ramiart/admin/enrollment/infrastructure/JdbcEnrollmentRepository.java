@@ -32,10 +32,26 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
     public int waitlistPosition(UUID id,UUID group,Instant at){if(group==null||at==null)return 0;return jdbc.sql("select count(*)+1 from enrollment_case where desired_class_group_id=:group and status='WAITLISTED' and (waitlisted_at,id)<(:at,:id)")
             .param("group",group).param("at",odt(at)).param("id",id).query(Integer.class).single();}
     public void insertCase(UUID id,UUID inquiry,byte[] name,byte[] phone,String hash,String last4,UUID course,UUID group,UUID actor){jdbc.sql("""
-            insert into enrollment_case(id,inquiry_id,lead_name_ciphertext,phone_ciphertext,phone_hash,phone_last4,desired_course_id,desired_class_group_id,created_by,updated_by)
-            values(:id,:inquiry,:name,:phone,:hash,:last4,:course,:group,:actor,:actor)
+            insert into enrollment_case(id,inquiry_id,lead_name_ciphertext,phone_ciphertext,phone_hash,phone_last4,desired_course_id,desired_class_group_id,assignee_admin_user_id,created_by,updated_by)
+            values(:id,:inquiry,:name,:phone,:hash,:last4,:course,:group,:assignee,:actor,:actor)
             """).param("id",id).param("inquiry",inquiry).param("name",name).param("phone",phone).param("hash",hash).param("last4",last4)
-            .param("course",course).param("group",group).param("actor",actor).update();}
+            .param("course",course).param("group",group).param("assignee",actor).param("actor",actor).update();}
+    public List<AssigneeOption> findAssignees(){return jdbc.sql("""
+            select u.id,u.display_name from admin_user u
+            join admin_user_role ur on ur.admin_user_id=u.id
+            join admin_role r on r.id=ur.admin_role_id and r.active
+            where u.status='ACTIVE' order by u.display_name,u.id
+            """)
+            .query((r,n)->new AssigneeOption(r.getObject("id",UUID.class),r.getString("display_name"))).list();}
+    public boolean isActiveAssignee(UUID id){return Boolean.TRUE.equals(jdbc.sql("""
+            select exists(select 1 from admin_user u join admin_user_role ur on ur.admin_user_id=u.id
+              join admin_role r on r.id=ur.admin_role_id and r.active where u.id=:id and u.status='ACTIVE')
+            """)
+            .param("id",id).query(Boolean.class).single());}
+    public int updateAssignee(UUID id,long version,UUID assigneeId,UUID actor){return jdbc.sql("""
+            update enrollment_case set assignee_admin_user_id=:assignee,updated_by=:actor,version=version+1
+            where id=:id and version=:version
+            """).param("assignee",assigneeId).param("actor",actor).param("id",id).param("version",version).update();}
     public int updateState(UUID id,long version,String expected,String next,UUID course,UUID group,Instant trial,Instant wait,String lost,UUID student,UUID actor){return jdbc.sql("""
             update enrollment_case set status=:next,desired_course_id=coalesce(:course,desired_course_id),desired_class_group_id=coalesce(:group,desired_class_group_id),
               trial_starts_at=coalesce(:trial,trial_starts_at),waitlisted_at=:wait,lost_reason=:lost,student_id=:student,updated_by=:actor,version=version+1
@@ -57,14 +73,21 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             .param("group",group).param("ids",ids.toArray(UUID[]::new)).query(UUID.class).list();}
     public List<UUID> requiredConsentIds(){return jdbc.sql("select id from consent_policy where status='PUBLISHED' and required order by type,id").query(UUID.class).list();}
     public List<DuplicateCandidate> duplicateCandidates(String name,LocalDate birthday,List<String> hashes){return jdbc.sql("""
-            select distinct s.id,s.student_name,to_char(s.birthday,'MM-DD') birthday_md,s.status,
-              case when s.student_name_search=:name and s.birthday=:birthday then 'NAME_BIRTHDAY' else 'GUARDIAN_PHONE' end matched
-            from student s left join guardian_contact g on g.student_id=s.id
-            where (:birthday is not null and s.student_name_search=:name and s.birthday=:birthday)
-               or (cardinality(cast(:hashes as text[]))>0 and g.phone_hash=any(cast(:hashes as text[])))
+            select s.id,s.student_name,s.status,array_agg(distinct matched.reason order by matched.reason) matched_by
+            from student s
+            cross join lateral (
+              select 'NAME_BIRTHDAY'::text reason
+              where :birthday is not null and s.student_name_search=:name and s.birthday=:birthday
+              union all
+              select 'GUARDIAN_PHONE'::text reason
+              where cardinality(cast(:hashes as text[]))>0 and exists(
+                select 1 from guardian_contact g where g.student_id=s.id and g.phone_hash=any(cast(:hashes as text[])))
+            ) matched
+            group by s.id,s.student_name,s.status
             order by s.student_name,s.id limit 10
             """).param("name",name).param("birthday",birthday).param("hashes",hashes.toArray(String[]::new))
-            .query((r,n)->new DuplicateCandidate(r.getObject(1,UUID.class),r.getString(2),r.getString(3),r.getString(4),List.of(r.getString(5)))).list();}
+            .query((r,n)->new DuplicateCandidate(r.getObject("id",UUID.class),r.getString("student_name"),r.getString("status"),
+                    Arrays.asList((String[])r.getArray("matched_by").getArray()))).list();}
     public void insertStudent(UUID id,StudentWrite s,String search,UUID actor){jdbc.sql("insert into student(id,student_name,student_name_search,school_name,birthday,status,joined_at,created_by,updated_by) values(:id,:name,:search,:school,:birthday,'ACTIVE',:joined,:actor,:actor)")
             .param("id",id).param("name",s.name()).param("search",search).param("school",s.schoolName()).param("birthday",s.birthday()).param("joined",s.joinedAt()).param("actor",actor).update();}
     public void insertGuardian(UUID student,StoredGuardian g){jdbc.sql("""
@@ -93,12 +116,13 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             .param("resource",resource).param("status",status).param("scope",scope).param("key",key).update();}
 
     private String baseSelect(){return """
-            select e.*,c.name course_name,g.name group_name,coalesce(g.capacity,0) capacity,
+            select e.*,assignee.display_name assignee_name,c.name course_name,g.name group_name,coalesce(g.capacity,0) capacity,
               coalesce((select count(distinct a.student_id) from student_schedule_assignment a join schedule_slot ss on ss.id=a.schedule_slot_id where ss.class_group_id=g.id and current_date between a.effective_from and coalesce(a.effective_to,'infinity'::date)),0) occupancy
             from enrollment_case e left join course c on c.id=e.desired_course_id left join class_group g on g.id=e.desired_class_group_id
+            join admin_user assignee on assignee.id=e.assignee_admin_user_id
             """;}
     private void bind(JdbcClient.StatementSpec q,List<String>s,UUID c,Instant f,Instant t){q.param("statuses",s.toArray(String[]::new)).param("from",odt(f)).param("to",odt(t));if(c!=null)q.param("course",c);}
-    private CaseRecord mapCase(ResultSet r,int n)throws SQLException{return new CaseRecord(r.getObject("id",UUID.class),r.getObject("inquiry_id",UUID.class),r.getBytes("lead_name_ciphertext"),r.getBytes("phone_ciphertext"),r.getString("phone_hash"),r.getString("phone_last4"),r.getString("status"),r.getObject("desired_course_id",UUID.class),r.getString("course_name"),r.getObject("desired_class_group_id",UUID.class),r.getString("group_name"),instant(r,"trial_starts_at"),instant(r,"waitlisted_at"),r.getObject("student_id",UUID.class),r.getString("lost_reason"),r.getLong("version"),instant(r,"updated_at"),r.getInt("capacity"),r.getInt("occupancy"));}
+    private CaseRecord mapCase(ResultSet r,int n)throws SQLException{return new CaseRecord(r.getObject("id",UUID.class),r.getObject("inquiry_id",UUID.class),r.getBytes("lead_name_ciphertext"),r.getBytes("phone_ciphertext"),r.getString("phone_hash"),r.getString("phone_last4"),r.getString("status"),r.getObject("desired_course_id",UUID.class),r.getString("course_name"),r.getObject("desired_class_group_id",UUID.class),r.getString("group_name"),instant(r,"trial_starts_at"),instant(r,"waitlisted_at"),r.getObject("student_id",UUID.class),r.getString("lost_reason"),r.getLong("version"),instant(r,"updated_at"),r.getInt("capacity"),r.getInt("occupancy"),r.getObject("assignee_admin_user_id",UUID.class),r.getString("assignee_name"));}
     private ActivityRecord mapActivity(ResultSet r,int n)throws SQLException{return new ActivityRecord(r.getObject("id",UUID.class),r.getLong("sequence"),r.getString("type"),r.getString("from_status"),r.getString("to_status"),r.getString("channel"),r.getString("outcome"),r.getBytes("note_ciphertext"),instant(r,"occurred_at"),r.getObject("created_by",UUID.class));}
     private static Instant instant(ResultSet r,String c)throws SQLException{OffsetDateTime v=r.getObject(c,OffsetDateTime.class);return v==null?null:v.toInstant();}
     private static OffsetDateTime odt(Instant v){return v.atOffset(ZoneOffset.UTC);}

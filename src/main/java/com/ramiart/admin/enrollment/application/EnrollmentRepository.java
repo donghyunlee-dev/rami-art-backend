@@ -12,7 +12,7 @@ public interface EnrollmentRepository {
     record CaseRecord(UUID id, UUID inquiryId, byte[] nameCiphertext, byte[] phoneCiphertext, String phoneHash,
             String phoneLast4, String status, UUID courseId, String courseName, UUID groupId, String groupName,
             Instant trialAt, Instant waitlistedAt, UUID studentId, String lostReason, long version,
-            Instant updatedAt, int capacity, int occupancy) {}
+            Instant updatedAt, int capacity, int occupancy, UUID assigneeId, String assigneeName) {}
     record ActivityRecord(UUID id,long sequence,String type,String fromStatus,String toStatus,String channel,
             String outcome,byte[] noteCiphertext,Instant occurredAt,UUID createdBy) {}
     record ClassLock(UUID id,UUID courseId,int capacity,String status,LocalDate startsOn,LocalDate endsOn,int occupancy) {}
@@ -25,6 +25,9 @@ public interface EnrollmentRepository {
     Optional<UUID> findCaseByInquiry(UUID id);
     CaseRecordsPage findPage(List<String> statuses,UUID courseId,Instant from,Instant to,int page,int size);
     Optional<CaseRecord> findCase(UUID id,boolean lock);
+    List<AssigneeOption> findAssignees();
+    boolean isActiveAssignee(UUID id);
+    int updateAssignee(UUID id,long version,UUID assigneeId,UUID actor);
     List<ActivityRecord> findActivities(UUID caseId);
     int waitlistPosition(UUID caseId,UUID groupId,Instant at);
     void insertCase(UUID id,UUID inquiryId,byte[] name,byte[] phone,String phoneHash,String last4,

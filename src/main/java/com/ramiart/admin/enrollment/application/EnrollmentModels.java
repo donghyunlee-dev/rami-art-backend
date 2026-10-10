@@ -12,7 +12,8 @@ public final class EnrollmentModels {
             UUID desiredClassGroupId) {}
     public record CaseSummary(UUID id, String leadName, String phoneLast4, String status,
             UUID desiredCourseId, String desiredCourseName, UUID desiredClassGroupId,
-            String desiredClassGroupName, String nextAction, Instant updatedAt, long version) {}
+            String desiredClassGroupName, String nextAction, UUID assigneeId, String assigneeName,
+            Instant updatedAt, long version) {}
     public record CasePage(List<CaseSummary> items, int page, int size, long totalElements, int totalPages) {}
     public record ActivityView(UUID id, long sequence, String type, String fromStatus, String toStatus,
             String channel, String outcome, String note, Instant occurredAt, UUID createdBy) {}
@@ -20,7 +21,10 @@ public final class EnrollmentModels {
             String status, UUID desiredCourseId, String desiredCourseName, UUID desiredClassGroupId,
             String desiredClassGroupName, Instant trialStartsAt, Instant waitlistedAt, Integer waitlistPosition,
             UUID studentId, String lostReason, long version, int capacity, int occupancy,
-            List<ActivityView> activities, List<String> actions) {}
+            List<ActivityView> activities, List<String> actions, String nextAction,
+            UUID assigneeId, String assigneeName) {}
+    public record AssigneeOption(UUID id, String displayName) {}
+    public record AssigneeWrite(UUID assigneeId, long caseVersion) {}
     public record ActivityWrite(String channel, String outcome, String note, Instant occurredAt, long caseVersion) {}
     public record TrialWrite(String action, UUID classGroupId, Instant trialStartsAt, String note, long caseVersion) {}
     public record WaitlistWrite(UUID classGroupId, String note, long caseVersion) {}
@@ -31,8 +35,7 @@ public final class EnrollmentModels {
     public record EnrollWrite(long caseVersion, StudentWrite student, List<GuardianWrite> guardians,
             UUID classGroupId, List<UUID> scheduleSlotIds, LocalDate effectiveFrom, List<UUID> consentIds,
             String duplicateOverrideReason, String previewToken) {}
-    public record DuplicateCandidate(UUID id, String studentName, String birthdayMonthDay, String status,
-            List<String> matchedBy) {}
+    public record DuplicateCandidate(UUID id, String studentName, String status, List<String> matchedBy) {}
     public record EnrollmentPreview(String previewToken, int capacity, int occupancy, int remainingSeats,
             List<UUID> requiredConsentIds, List<UUID> missingConsentIds,
             List<DuplicateCandidate> duplicateCandidates, boolean canEnroll) {}

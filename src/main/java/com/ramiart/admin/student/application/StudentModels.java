@@ -17,7 +17,7 @@ public final class StudentModels {
             String phone, String maskedPhone, String email, String maskedEmail, String preferredChannel,
             boolean notificationAvailable, boolean primaryContact, int displayOrder) {}
     public record StatusSummary(Instant lastChangedAt, String lastReason) {}
-    public record StudentDetail(UUID id, String studentName, String schoolName, LocalDate birthday,
+    public record StudentDetail(UUID id, UUID enrollmentCaseId, String studentName, String schoolName, LocalDate birthday,
             int lessonCountPerWeek, String status, LocalDate joinedAt, long version,
             List<GuardianView> guardians, StatusSummary statusSummary, List<String> actions) {}
     public record GuardianWrite(UUID id, String name, String relationship, String relationshipDetail,

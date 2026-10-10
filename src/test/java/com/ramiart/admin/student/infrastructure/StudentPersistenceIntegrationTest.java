@@ -124,6 +124,23 @@ class StudentPersistenceIntegrationTest {
     }
 
     @Test
+    void detailIncludesEnrollmentCaseSourceWhenPresentAndNullWhenAbsent() {
+        UUID actor = actor();
+        var student = service.create(createCommand("출처 원생", "010-4567-8910"), actor,
+                UUID.randomUUID(), metadata("student-source-create"));
+
+        assertThat(service.detail(student.id()).enrollmentCaseId()).isNull();
+
+        UUID caseId = UUID.randomUUID();
+        jdbc.update("""
+                insert into enrollment_case(id,lead_name_ciphertext,phone_ciphertext,phone_hash,phone_last4,assignee_admin_user_id,created_by,updated_by,student_id,status)
+                values(?,?,?,?,?,?,?,?,?,'ENROLLED')
+                """, caseId, new byte[] {1}, new byte[] {2}, "a".repeat(64), "8910", actor, actor, actor, student.id());
+
+        assertThat(service.detail(student.id()).enrollmentCaseId()).isEqualTo(caseId);
+    }
+
+    @Test
     void statusHistoryAndNotesAreVersionedEncryptedAndAppendOnly() {
         UUID actor = actor();
         var student = service.create(createCommand("박바다", "010-2222-3333"), actor,

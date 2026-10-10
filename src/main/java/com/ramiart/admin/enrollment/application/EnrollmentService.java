@@ -33,9 +33,10 @@ public class EnrollmentService {
         Instant end=to==null?clock.instant().plusSeconds(1):to,start=from==null?end.minus(Duration.ofDays(365*3L)):from;
         if(stateList.isEmpty()||stateList.stream().anyMatch(s->!STATES.contains(s))||page<0||!Set.of(10,20,50).contains(size)||!start.isBefore(end))fail("VALIDATION_ERROR");
         CaseRecordsPage records=repository.findPage(stateList,course,start,end,page,size);
-        List<CaseSummary> items=records.items().stream().map(c->new CaseSummary(c.id(),maskName(protector.reveal(c.nameCiphertext())),c.phoneLast4(),c.status(),c.courseId(),c.courseName(),c.groupId(),c.groupName(),nextAction(c.status()),c.updatedAt(),c.version())).toList();
+        List<CaseSummary> items=records.items().stream().map(c->new CaseSummary(c.id(),maskName(protector.reveal(c.nameCiphertext())),c.phoneLast4(),c.status(),c.courseId(),c.courseName(),c.groupId(),c.groupName(),nextAction(c.status()),c.assigneeId(),c.assigneeName(),c.updatedAt(),c.version())).toList();
         return new CasePage(items,page,size,records.total(),records.total()==0?0:(int)((records.total()+size-1)/size));
     }
+    @Transactional(readOnly=true) public List<AssigneeOption> assignees(){return repository.findAssignees();}
     @Transactional(readOnly=true) public CaseDetail detail(UUID id){return detail(record(id,false));}
 
     @Transactional
@@ -67,6 +68,20 @@ public class EnrollmentService {
     }
 
     @Transactional
+    public CaseDetail assign(UUID id,AssigneeWrite raw,UUID actor,UUID key,RequestMetadata meta){
+        if(raw==null||raw.assigneeId()==null||raw.caseVersion()<0)fail("VALIDATION_ERROR");
+        String scope="ENROLLMENT_ASSIGN:"+id,requestHash=hash(raw);Claim claim=repository.claim(scope,key,requestHash);
+        if(!claim.claimed())return detail(claim.resourceId());
+        CaseRecord c=record(id,true);if(c.version()!=raw.caseVersion())conflict();ensureOpen(c);
+        if(!repository.isActiveAssignee(raw.assigneeId()))throw new EnrollmentException("ENROLLMENT_ASSIGNEE_INVALID");
+        if(!c.assigneeId().equals(raw.assigneeId())){
+            if(repository.updateAssignee(id,c.version(),raw.assigneeId(),actor)==0)conflict();
+            event(actor,meta,"ENROLLMENT_ASSIGNEE_CHANGED",id,Map.of("fromAssigneeId",c.assigneeId(),"toAssigneeId",raw.assigneeId()));
+        }
+        repository.complete(scope,key,id,200);return detail(id);
+    }
+
+    @Transactional
     public EnrollmentPreview preview(UUID id,EnrollWrite raw){CaseRecord c=record(id,true);validateEnroll(c,raw);ClassLock group=lockGroup(raw);List<UUID> required=repository.requiredConsentIds();List<UUID> missing=required.stream().filter(v->!raw.consentIds().contains(v)).toList();List<StoredGuardian> guardians=guardians(raw.guardians());List<DuplicateCandidate> duplicates=maskedDuplicates(repository.duplicateCandidates(search(raw.student().name()),raw.student().birthday(),guardians.stream().map(StoredGuardian::phoneHash).toList()));boolean override=duplicates.isEmpty()||text(raw.duplicateOverrideReason(),5,200)!=null;boolean can=group.occupancy()<group.capacity()&&missing.isEmpty()&&override;return new EnrollmentPreview(token(id,raw,group,required,duplicates),group.capacity(),group.occupancy(),Math.max(0,group.capacity()-group.occupancy()),required,missing,duplicates,can);}
 
     @Transactional
@@ -84,7 +99,7 @@ public class EnrollmentService {
     private List<StoredGuardian> guardians(List<GuardianWrite> values){if(values==null||values.isEmpty()||values.size()>5||values.stream().filter(GuardianWrite::primaryContact).count()!=1)fail("VALIDATION_ERROR");Set<String> phones=new HashSet<>();Set<Integer> orders=new HashSet<>();List<StoredGuardian> out=new ArrayList<>();for(GuardianWrite g:values){String name=name(g.name()),phone=phone(g.phone()),relationship=g.relationship(),detail=text(g.relationshipDetail(),1,50),channel=g.preferredChannel()==null?"SMS":g.preferredChannel(),email=text(g.email(),1,254);if(name==null||name.length()>100||!Set.of("MOTHER","FATHER","GRANDPARENT","GUARDIAN","OTHER").contains(relationship)||("OTHER".equals(relationship))!=(detail!=null)||!Set.of("SMS","KAKAO","EMAIL","MANUAL").contains(channel)||"EMAIL".equals(channel)&&email==null||email!=null&&!EMAIL.matcher(email).matches()||g.displayOrder()<0||!orders.add(g.displayOrder()))fail("VALIDATION_ERROR");var p=protector.protect(phone);if(!phones.add(p.hash()))fail("GUARDIAN_PHONE_DUPLICATED");var e=email==null?null:protector.protect(email.toLowerCase(Locale.ROOT));out.add(new StoredGuardian(UUID.randomUUID(),new GuardianWrite(name,relationship,detail,phone,email,channel,g.primaryContact(),g.displayOrder()),p.ciphertext(),p.hash(),phone.substring(phone.length()-4),e==null?null:e.ciphertext(),e==null?null:e.hash(),email==null?null:email.substring(email.indexOf('@')+1).toLowerCase(Locale.ROOT)));}for(int i=0;i<out.size();i++)if(!orders.contains(i))fail("VALIDATION_ERROR");return out;}
     private StudentWrite normalize(StudentWrite s){if(s==null)fail("VALIDATION_ERROR");String name=name(s.name()),school=text(s.schoolName(),1,150);LocalDate today=LocalDate.now(clock);if(name==null||name.length()>100||s.joinedAt()==null||s.joinedAt().isAfter(today.plusDays(31))||s.birthday()!=null&&(s.birthday().isAfter(today)||s.joinedAt().isBefore(s.birthday())))fail("VALIDATION_ERROR");return new StudentWrite(name,s.birthday(),school,s.joinedAt());}
     private CaseRecord record(UUID id,boolean lock){return repository.findCase(id,lock).orElseThrow(()->new EnrollmentException("ENROLLMENT_NOT_FOUND"));}
-    private CaseDetail detail(CaseRecord c){List<ActivityView> activities=repository.findActivities(c.id()).stream().map(a->new ActivityView(a.id(),a.sequence(),a.type(),a.fromStatus(),a.toStatus(),a.channel(),a.outcome(),a.noteCiphertext()==null?null:protector.reveal(a.noteCiphertext()),a.occurredAt(),a.createdBy())).toList();return new CaseDetail(c.id(),c.inquiryId(),protector.reveal(c.nameCiphertext()),protector.reveal(c.phoneCiphertext()),c.phoneLast4(),c.status(),c.courseId(),c.courseName(),c.groupId(),c.groupName(),c.trialAt(),c.waitlistedAt(),"WAITLISTED".equals(c.status())?repository.waitlistPosition(c.id(),c.groupId(),c.waitlistedAt()):null,c.studentId(),c.lostReason(),c.version(),c.capacity(),c.occupancy(),activities,actions(c.status()));}
+    private CaseDetail detail(CaseRecord c){List<ActivityView> activities=repository.findActivities(c.id()).stream().map(a->new ActivityView(a.id(),a.sequence(),a.type(),a.fromStatus(),a.toStatus(),a.channel(),a.outcome(),a.noteCiphertext()==null?null:protector.reveal(a.noteCiphertext()),a.occurredAt(),a.createdBy())).toList();return new CaseDetail(c.id(),c.inquiryId(),protector.reveal(c.nameCiphertext()),protector.reveal(c.phoneCiphertext()),c.phoneLast4(),c.status(),c.courseId(),c.courseName(),c.groupId(),c.groupName(),c.trialAt(),c.waitlistedAt(),"WAITLISTED".equals(c.status())?repository.waitlistPosition(c.id(),c.groupId(),c.waitlistedAt()):null,c.studentId(),c.lostReason(),c.version(),c.capacity(),c.occupancy(),activities,actions(c.status()),nextAction(c.status()),c.assigneeId(),c.assigneeName());}
     private EnrollmentResult result(CaseDetail d){return new EnrollmentResult(d,d.studentId(),repository.guardianIds(d.studentId()),repository.assignmentIds(d.studentId()));}
     private byte[] encryptOptional(String value,int max){String v=text(value,1,max);return v==null?null:protector.protect(v).ciphertext();}
     private String token(UUID id,EnrollWrite r,ClassLock g,List<UUID> consents,List<DuplicateCandidate> duplicates){String payload=id+"|"+clock.instant().getEpochSecond()+"|"+fingerprint(r)+"|"+g.occupancy()+"|"+hash(consents)+"|"+hash(duplicates);return Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8))+"."+protector.hash(payload);}
@@ -95,7 +110,7 @@ public class EnrollmentService {
     private static String nextAction(String status){return switch(status){case "NEW"->"CONTACT";case "CONTACTED"->"SCHEDULE_TRIAL";case "TRIAL_SCHEDULED"->"COMPLETE_TRIAL";case "TRIAL_COMPLETED","WAITLISTED"->"ENROLL";default->null;};}
     private static String name(String value){String v=text(value,1,100);return v==null?null:v.replaceAll("\\s+"," ");}private static String search(String value){return name(value).toLowerCase(Locale.ROOT).replaceAll("\\s+","");}
     private static String maskName(String value){if(value==null||value.isBlank())return "*";int[] points=value.codePoints().toArray();if(points.length==1)return "*";return new String(points,0,1)+"*".repeat(points.length-1);}
-    private static List<DuplicateCandidate> maskedDuplicates(List<DuplicateCandidate> values){return values.stream().map(v->new DuplicateCandidate(v.id(),maskName(v.studentName()),v.birthdayMonthDay(),v.status(),v.matchedBy())).toList();}
+    private static List<DuplicateCandidate> maskedDuplicates(List<DuplicateCandidate> values){return values.stream().map(v->new DuplicateCandidate(v.id(),maskName(v.studentName()),v.status(),v.matchedBy())).toList();}
     private static String phone(String value){if(value==null)fail("VALIDATION_ERROR");String v=value.replaceAll("[^0-9+]","");if(v.startsWith("010"))v="+82"+v.substring(1);else if(v.startsWith("0"))v="+82"+v.substring(1);if(!v.matches("\\+[1-9][0-9]{7,14}"))fail("VALIDATION_ERROR");return v;}
     private static String text(String value,int min,int max){if(value==null)return null;String v=value.trim();return v.length()<min||v.length()>max?null:v;}
     private static String hash(Object value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(String.valueOf(value).getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}

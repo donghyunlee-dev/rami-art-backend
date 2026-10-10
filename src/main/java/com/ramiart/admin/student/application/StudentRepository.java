@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface StudentRepository {
-    record StudentRecord(UUID id, String name, String school, LocalDate birthday, String status,
+    record StudentRecord(UUID id, UUID enrollmentCaseId, String name, String school, LocalDate birthday, String status,
             LocalDate joinedAt, UUID createdBy, long version, Instant lastChangedAt, String lastReason) {}
     record GuardianRecord(UUID id, UUID studentId, String name, String relationship, String relationshipDetail,
             byte[] phoneCiphertext, byte[] emailCiphertext, String emailDomain, String preferredChannel,

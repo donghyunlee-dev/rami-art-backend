@@ -60,7 +60,8 @@ public class JdbcStudentRepository implements StudentRepository {
 
     public Optional<StudentRecord> findStudent(UUID id) {
         return jdbc.sql("""
-                select s.*,h.changed_at,h.reason from student s
+                select s.*,e.id enrollment_case_id,h.changed_at,h.reason from student s
+                left join enrollment_case e on e.student_id=s.id
                 left join lateral (select changed_at,reason from student_status_history where student_id=s.id order by changed_at desc,id desc limit 1) h on true
                 where s.id=:id
                 """).param("id",id).query(this::student).optional();
@@ -166,7 +167,7 @@ public class JdbcStudentRepository implements StudentRepository {
 
     private JdbcClient.StatementSpec query(String sql,Map<String,Object> p){ var q=jdbc.sql(sql); for(var e:p.entrySet()) q=q.param(e.getKey(),e.getValue()); return q; }
     private StudentSummary summary(ResultSet r,int n)throws SQLException{return new StudentSummary(r.getObject("id",UUID.class),r.getString("student_name"),r.getString("school_name"),r.getString("birthday_month_day"),r.getInt("lesson_count"),r.getString("status"),r.getObject("joined_at",LocalDate.class),r.getLong("version"),List.of("VIEW","EDIT","CHANGE_STATUS"));}
-    private StudentRecord student(ResultSet r,int n)throws SQLException{return new StudentRecord(r.getObject("id",UUID.class),r.getString("student_name"),r.getString("school_name"),r.getObject("birthday",LocalDate.class),r.getString("status"),r.getObject("joined_at",LocalDate.class),r.getObject("created_by",UUID.class),r.getLong("version"),instant(r,"changed_at"),r.getString("reason"));}
+    private StudentRecord student(ResultSet r,int n)throws SQLException{return new StudentRecord(r.getObject("id",UUID.class),r.getObject("enrollment_case_id",UUID.class),r.getString("student_name"),r.getString("school_name"),r.getObject("birthday",LocalDate.class),r.getString("status"),r.getObject("joined_at",LocalDate.class),r.getObject("created_by",UUID.class),r.getLong("version"),instant(r,"changed_at"),r.getString("reason"));}
     private GuardianRecord guardian(ResultSet r,int n)throws SQLException{return new GuardianRecord(r.getObject("id",UUID.class),r.getObject("student_id",UUID.class),r.getString("name"),r.getString("relationship"),r.getString("relationship_detail"),r.getBytes("phone_ciphertext"),r.getBytes("email_ciphertext"),r.getString("email_domain"),r.getString("preferred_channel"),r.getBoolean("primary_contact"),r.getInt("display_order"));}
     private NoteRecord note(ResultSet r,int n)throws SQLException{return new NoteRecord(r.getObject("id",UUID.class),r.getObject("student_id",UUID.class),r.getBytes("content_ciphertext"),r.getObject("created_by",UUID.class),r.getString("creator"),instant(r,"created_at"),instant(r,"updated_at"),r.getLong("version"));}
     private static Instant instant(ResultSet r,String c)throws SQLException{OffsetDateTime o=r.getObject(c,OffsetDateTime.class);return o==null?null:o.toInstant();}

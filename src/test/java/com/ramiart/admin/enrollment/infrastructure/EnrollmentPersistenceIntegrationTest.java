@@ -62,11 +62,12 @@ class EnrollmentPersistenceIntegrationTest {
         UUID actor=actor(),course=UUID.randomUUID(),group=UUID.randomUUID(),slot=UUID.randomUUID(),policy=UUID.randomUUID();fixture(actor,course,group,slot,policy,2);
         var created=service.create(new CaseCreate(null,"김상담","010-1234-5678",course,group),actor,UUID.randomUUID(),meta("create"));
         assertThat(created.status()).isEqualTo("NEW");assertThat(created.phone()).isEqualTo("+821012345678");
+        assertThat(created.nextAction()).isEqualTo("CONTACT");
         EnrollWrite draft=enroll(created.version(),group,slot,policy,"010-1234-5678",null,null);
         var preview=service.preview(created.id(),draft);assertThat(preview.canEnroll()).isTrue();
         EnrollWrite command=enroll(created.version(),group,slot,policy,"010-1234-5678",null,preview.previewToken());UUID key=UUID.randomUUID();
         var enrolled=service.enroll(created.id(),command,actor,key,meta("enroll"));var replayed=service.enroll(created.id(),command,actor,key,meta("replay"));
-        assertThat(enrolled.enrollmentCase().status()).isEqualTo("ENROLLED");assertThat(replayed.studentId()).isEqualTo(enrolled.studentId());
+        assertThat(enrolled.enrollmentCase().status()).isEqualTo("ENROLLED");assertThat(enrolled.enrollmentCase().nextAction()).isNull();assertThat(replayed.studentId()).isEqualTo(enrolled.studentId());
         assertThat(enrolled.guardianIds()).hasSize(1);assertThat(enrolled.scheduleAssignmentIds()).hasSize(1);
         assertThat(jdbc.queryForObject("select count(*) from student where id=?",Integer.class,enrolled.studentId())).isOne();
         assertThat(jdbc.queryForObject("select count(*) from student_consent where student_id=?",Integer.class,enrolled.studentId())).isOne();
@@ -74,6 +75,57 @@ class EnrollmentPersistenceIntegrationTest {
         assertThat(new String(jdbc.queryForObject("select phone_ciphertext from enrollment_case where id=?",byte[].class,created.id()),StandardCharsets.UTF_8)).doesNotContain("12345678");
         assertThatThrownBy(()->jdbc.update("delete from enrollment_activity where enrollment_case_id=?",created.id()))
                 .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("enrollment activity is append only");
+    }
+
+    @Test void enrollmentCaseHasAssignableAdminOwner(){
+        UUID actor=actor(),assignee=UUID.randomUUID(),course=UUID.randomUUID(),group=UUID.randomUUID();
+        jdbc.update("insert into admin_user(id,email,password_hash,display_name,created_by) values(?,?,'test','상담 담당자',?)",
+                assignee,"assignee-"+assignee+"@example.test",actor);
+        UUID operatorRole=jdbc.queryForObject("select id from admin_role where code='OPERATOR'",UUID.class);
+        jdbc.update("insert into admin_user_role(admin_user_id,admin_role_id,assigned_by) values(?,?,?)",assignee,operatorRole,actor);
+        fixture(actor,course,group,UUID.randomUUID(),UUID.randomUUID(),2);
+        var created=service.create(new CaseCreate(null,"상담 문의","010-1234-5678",course,group),actor,UUID.randomUUID(),meta("assignee-create"));
+        assertThat(created.assigneeId()).isEqualTo(actor);
+
+        var changed=service.assign(created.id(),new AssigneeWrite(assignee,created.version()),actor,UUID.randomUUID(),meta("assignee-change"));
+
+        assertThat(changed.assigneeId()).isEqualTo(assignee);
+        assertThat(changed.assigneeName()).isEqualTo("상담 담당자");
+        assertThat(changed.version()).isEqualTo(created.version()+1);
+        assertThat(service.assignees()).anyMatch(value->value.id().equals(assignee));
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where action='ENROLLMENT_ASSIGNEE_CHANGED'",Integer.class)).isOne();
+    }
+
+    @Test void assignmentRejectsInactiveAdminAndStaleCaseVersion(){
+        UUID actor=actor(),inactive=UUID.randomUUID(),replacement=UUID.randomUUID(),course=UUID.randomUUID(),group=UUID.randomUUID();
+        jdbc.update("insert into admin_user(id,email,password_hash,display_name,created_by) values(?,?,'test','비활성 관리자',?)",
+                inactive,"inactive-"+inactive+"@example.test",actor);
+        jdbc.update("insert into admin_user(id,email,password_hash,display_name,created_by) values(?,?,'test','새 담당자',?)",
+                replacement,"replacement-"+replacement+"@example.test",actor);
+        UUID operatorRole=jdbc.queryForObject("select id from admin_role where code='OPERATOR'",UUID.class);
+        jdbc.update("insert into admin_user_role(admin_user_id,admin_role_id,assigned_by) values(?,?,?)",inactive,operatorRole,actor);
+        jdbc.update("insert into admin_user_role(admin_user_id,admin_role_id,assigned_by) values(?,?,?)",replacement,operatorRole,actor);
+        jdbc.update("update admin_user set status='INACTIVE',status_reason='test' where id=?",inactive);
+        fixture(actor,course,group,UUID.randomUUID(),UUID.randomUUID(),2);
+        var created=service.create(new CaseCreate(null,"상담 문의","010-1234-5678",course,group),actor,UUID.randomUUID(),meta("invalid-assignee-create"));
+
+        assertThatThrownBy(()->service.assign(created.id(),new AssigneeWrite(inactive,created.version()),actor,UUID.randomUUID(),meta("inactive-assignee")))
+                .isInstanceOf(EnrollmentException.class).extracting("code").isEqualTo("ENROLLMENT_ASSIGNEE_INVALID");
+
+        var changed=service.assign(created.id(),new AssigneeWrite(replacement,created.version()),actor,UUID.randomUUID(),meta("assignee-version-update"));
+        assertThatThrownBy(()->service.assign(created.id(),new AssigneeWrite(inactive,created.version()),actor,UUID.randomUUID(),meta("stale-assignee-version")))
+                .isInstanceOf(EnrollmentException.class).extracting("code").isEqualTo("ENROLLMENT_VERSION_CONFLICT");
+        assertThat(service.detail(created.id()).assigneeId()).isEqualTo(replacement);
+        assertThat(service.detail(created.id()).version()).isEqualTo(changed.version());
+    }
+
+    @Test void assignmentRejectsTerminalCases(){
+        UUID actor=actor(),course=UUID.randomUUID(),group=UUID.randomUUID();fixture(actor,course,group,UUID.randomUUID(),UUID.randomUUID(),2);
+        var created=service.create(new CaseCreate(null,"상담 문의","010-1234-5678",course,group),actor,UUID.randomUUID(),meta("terminal-assignee-create"));
+        var lost=service.lost(created.id(),new LostWrite("다른 기관 등록",created.version()),actor,UUID.randomUUID(),meta("terminal-assignee-lost"));
+
+        assertThatThrownBy(()->service.assign(created.id(),new AssigneeWrite(actor,lost.version()),actor,UUID.randomUUID(),meta("terminal-assignee")))
+                .isInstanceOf(EnrollmentException.class).extracting("code").isEqualTo("ENROLLMENT_INVALID_TRANSITION");
     }
 
     @Test void capacityConsentAndDuplicateChecksPreventPartialStudents(){
@@ -90,6 +142,21 @@ class EnrollmentPersistenceIntegrationTest {
         assertThatThrownBy(()->service.enroll(second.id(),enroll(second.version(),group,slot,policy,"010-3333-4444",null,fullPreview.previewToken()),actor,UUID.randomUUID(),meta("full")))
                 .isInstanceOf(EnrollmentException.class).extracting("code").isEqualTo("ENROLLMENT_CAPACITY_FULL");
         assertThat(jdbc.queryForObject("select count(*) from student",Integer.class)).isOne();
+    }
+
+    @Test void duplicatePreviewReturnsEveryMatchReason(){
+        UUID actor=actor(),course=UUID.randomUUID(),group=UUID.randomUUID(),slot=UUID.randomUUID(),policy=UUID.randomUUID();fixture(actor,course,group,slot,policy,3);
+        var first=service.create(new CaseCreate(null,"첫 상담","010-1111-2222",course,group),actor,UUID.randomUUID(),meta("duplicate-first"));
+        var firstDraft=enroll(first.version(),group,slot,policy,"010-1111-2222",null,null);
+        var firstPreview=service.preview(first.id(),firstDraft);
+        service.enroll(first.id(),enroll(first.version(),group,slot,policy,"010-1111-2222",null,firstPreview.previewToken()),actor,UUID.randomUUID(),meta("duplicate-first-enroll"));
+
+        var second=service.create(new CaseCreate(null,"둘 상담","010-3333-4444",course,group),actor,UUID.randomUUID(),meta("duplicate-second"));
+        var secondPreview=service.preview(second.id(),enroll(second.version(),group,slot,policy,"010-1111-2222",null,null));
+
+        assertThat(secondPreview.duplicateCandidates()).hasSize(1);
+        assertThat(secondPreview.duplicateCandidates().getFirst().matchedBy())
+                .containsExactlyInAnyOrder("NAME_BIRTHDAY","GUARDIAN_PHONE");
     }
 
     @Test void defaultListIncludesNewlyCreatedCaseAndReturnsEmptyListWhenNoneExist() throws Exception {
