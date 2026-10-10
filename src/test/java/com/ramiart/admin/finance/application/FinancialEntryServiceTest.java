@@ -27,10 +27,10 @@ class FinancialEntryServiceTest {
         EntryPage expected = new EntryPage(List.of(), new FinancialEntryModels.Page(0,20,0,0),
                 new FinancialEntryModels.Totals(0,0,0,0), new FinancialEntryModels.Applied(
                         java.time.LocalDate.parse("2026-10-01"),java.time.LocalDate.parse("2026-10-31"),List.of("CONFIRMED")));
-        when(repository.list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),List.of("CONFIRMED"),null,0,20)).thenReturn(expected);
-        assertThat(service.list(null,null,null,null,null,null,null,0,20,reader)).isSameAs(expected);
-        verify(repository).list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),List.of("CONFIRMED"),null,0,20);
-        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,null,0,20,auth("STUDENT_READ")))
+        when(repository.list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),List.of("CONFIRMED"),null,null,0,20)).thenReturn(expected);
+        assertThat(service.list(null,null,null,null,null,null,null,null,0,20,reader)).isSameAs(expected);
+        verify(repository).list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),List.of("CONFIRMED"),null,null,0,20);
+        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,null,null,0,20,auth("STUDENT_READ")))
                 .isInstanceOf(FinancialEntryService.FinancialEntryException.class)
                 .hasMessage("FINANCE_READ_DENIED");
     }
@@ -38,12 +38,27 @@ class FinancialEntryServiceTest {
     @Test
     void listRejectsInvalidStatusPageAndKeywordBeforeQuery() {
         var reader = auth("FINANCE_READ");
-        assertThatThrownBy(() -> service.list(null,null,null,null,null,List.of("UNKNOWN"),null,0,20,reader))
+        assertThatThrownBy(() -> service.list(null,null,null,null,null,List.of("UNKNOWN"),null,null,0,20,reader))
                 .hasMessage("FINANCIAL_ENTRY_QUERY_INVALID");
-        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,"a",0,20,reader))
+        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,"a",null,0,20,reader))
                 .hasMessage("FINANCIAL_ENTRY_QUERY_INVALID");
-        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,null,0,30,reader))
+        assertThatThrownBy(() -> service.list(null,null,null,null,null,null,null,null,0,30,reader))
                 .hasMessage("FINANCIAL_ENTRY_QUERY_INVALID");
+    }
+
+    @Test
+    void listCanNarrowToAnExactSourceTransaction() {
+        var reader = auth("FINANCE_READ");
+        UUID entryId = UUID.randomUUID();
+        EntryPage expected = new EntryPage(List.of(), new FinancialEntryModels.Page(0,20,0,0),
+                new FinancialEntryModels.Totals(0,0,0,0), new FinancialEntryModels.Applied(
+                        java.time.LocalDate.parse("2026-10-01"),java.time.LocalDate.parse("2026-10-31"),List.of("CONFIRMED")));
+        when(repository.list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),
+                List.of("CONFIRMED"),null,entryId,0,20)).thenReturn(expected);
+
+        assertThat(service.list(null,null,null,null,null,null,null,entryId,0,20,reader)).isSameAs(expected);
+        verify(repository).list(expected.applied().from(),expected.applied().to(),List.of(),List.of(),List.of(),
+                List.of("CONFIRMED"),null,entryId,0,20);
     }
 
     private static TestingAuthenticationToken auth(String permission) {

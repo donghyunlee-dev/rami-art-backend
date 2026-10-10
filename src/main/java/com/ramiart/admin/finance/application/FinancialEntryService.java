@@ -33,7 +33,7 @@ public class FinancialEntryService {
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public EntryPage list(LocalDate from, LocalDate to, List<String> types, List<UUID> accounts,
-            List<String> categories, List<String> statuses, String keyword, int page, int size,
+            List<String> categories, List<String> statuses, String keyword, UUID entryId, int page, int size,
             Authentication authentication) {
         require(authentication, "FINANCE_READ");
         LocalDate today = LocalDate.now(clock.withZone(STUDIO_ZONE));
@@ -51,7 +51,7 @@ public class FinancialEntryService {
         return repository.list(start, end, types == null ? List.of() : types.stream().distinct().sorted().toList(),
                 accounts == null ? List.of() : accounts.stream().distinct().sorted().toList(),
                 categories == null ? List.of() : categories.stream().distinct().sorted().toList(), selectedStatuses,
-                keyword == null || keyword.isBlank() ? null : keyword.trim(), page, size);
+                keyword == null || keyword.isBlank() ? null : keyword.trim(), entryId, page, size);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

@@ -149,7 +149,7 @@ public class TuitionAdjustmentService {
         else{if(!List.of("DISCOUNT","MATERIAL","EXTRA","CORRECTION").contains(r.type())||r.signedAmount()==null||r.signedAmount()==0
                 ||Math.abs(r.signedAmount())>999999999999L||!validReason(r.reason(),5,300)||"DISCOUNT".equals(r.type())&&r.signedAmount()>0
                 ||List.of("MATERIAL","EXTRA").contains(r.type())&&r.signedAmount()<0)throw new TuitionAdjustmentException("VALIDATION_ERROR");}
-        if(r.refundAmount()!=null&&(r.refundAmount()<1||r.paymentId()==null||r.paymentVersion()==null))throw new TuitionAdjustmentException("VALIDATION_ERROR");}
+        if(r.refundAmount()!=null&&(r.refundAmount()<1||r.paymentId()==null&&r.paymentVersion()!=null||r.paymentId()!=null&&r.paymentVersion()==null))throw new TuitionAdjustmentException("VALIDATION_ERROR");}
     private static void validateRefund(RefundRequest r,UUID key){if(r==null||key==null||r.amount()<1||r.amount()>999999999999L||r.refundedOn()==null
             ||!List.of("CASH","TRANSFER","CARD","OTHER").contains(r.method())||!validReason(r.reason(),5,300)||r.billingVersion()<0
             ||r.paymentId()==null&&r.paymentVersion()!=null)throw new TuitionAdjustmentException("VALIDATION_ERROR");}

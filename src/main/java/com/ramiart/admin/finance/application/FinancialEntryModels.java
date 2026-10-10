@@ -15,7 +15,7 @@ public final class FinancialEntryModels {
     public record Actions(boolean canCancel) {}
     public record Entry(UUID entryId, LocalDate transactionDate, String type, Account account, Category category,
             String description, long amount, String status, String sourceType, UUID sourceId, String externalId,
-            Creator createdBy, OffsetDateTime createdAt, OffsetDateTime cancelledAt, String cancelReason,
+            UUID sourceBillingId, UUID sourceBatchId, Creator createdBy, OffsetDateTime createdAt, OffsetDateTime cancelledAt, String cancelReason,
             long version, Actions actions) {}
     public record Totals(long income, long expense, long net, long count) {}
     public record Page(int number, int size, long totalElements, long totalPages) {}

@@ -22,24 +22,29 @@ public class JdbcFinancialEntryRepository implements FinancialEntryRepository {
     public JdbcFinancialEntryRepository(NamedParameterJdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     @Override public EntryPage list(LocalDate from, LocalDate to, List<String> types, List<UUID> accounts,
-            List<String> categories, List<String> statuses, String keyword, int page, int size) {
+            List<String> categories, List<String> statuses, String keyword, UUID entryId, int page, int size) {
         MapSqlParameterSource p = new MapSqlParameterSource().addValue("from", from).addValue("to", to)
                 .addValue("types", types).addValue("accounts", accounts).addValue("categories", categories)
-                .addValue("statuses", statuses).addValue("keyword", keyword).addValue("offset", (long)page * size).addValue("size", size);
+                .addValue("statuses", statuses).addValue("keyword", keyword).addValue("entryId", entryId)
+                .addValue("offset", (long)page * size).addValue("size", size);
         StringBuilder where = new StringBuilder(" where e.transaction_date between :from and :to ");
+        if (entryId != null) where.append("and e.id=:entryId ");
         if (!types.isEmpty()) where.append("and e.type in (:types) ");
         if (!accounts.isEmpty()) where.append("and e.account_id in (:accounts) ");
         if (!categories.isEmpty()) where.append("and e.category_code in (:categories) ");
         where.append("and e.status in (:statuses) ");
         if (keyword != null) where.append("and e.description ilike :keyword ");
         if (keyword != null) p.addValue("keyword", "%" + keyword + "%");
-        String fromSql = " from financial_entry e join finance_account a on a.id=e.account_id join finance_category c on c.code=e.category_code join admin_user u on u.id=e.created_by ";
+        String fromSql = " from financial_entry e join finance_account a on a.id=e.account_id join finance_category c on c.code=e.category_code join admin_user u on u.id=e.created_by "
+                + "left join tuition_payment payment_source on e.source_type='TUITION_PAYMENT' and payment_source.id=e.source_id "
+                + "left join tuition_refund refund_source on e.source_type='TUITION_REFUND' and refund_source.id=e.source_id "
+                + "left join financial_import_row import_source on e.source_type='IMPORT' and import_source.id=e.source_id ";
         long count = jdbc.queryForObject("select count(*)" + fromSql + where, p, Long.class);
         long income = total("INCOME", fromSql, where, p), expense = total("EXPENSE", fromSql, where, p);
-        List<Entry> items = jdbc.query("select e.*,a.name account_name,a.active account_active,a.type account_type,a.display_order account_order,c.name category_name,c.type category_type,c.active category_active,c.display_order category_order,u.display_name created_by_name"
+        List<Entry> items = jdbc.query("select e.*,a.name account_name,a.active account_active,a.type account_type,a.display_order account_order,c.name category_name,c.type category_type,c.active category_active,c.display_order category_order,u.display_name created_by_name,coalesce(payment_source.billing_id,refund_source.billing_id) source_billing_id,import_source.batch_id import_batch_id"
                 + fromSql + where + " order by e.transaction_date desc,e.id desc limit :size offset :offset", p, this::entry);
         return new EntryPage(items, new Page(page, size, count, (count + size - 1) / size),
-                new Totals(income, expense, income - expense, countConfirmed(fromSql, from, to, types, accounts, categories, keyword)), new Applied(from, to, statuses));
+                new Totals(income, expense, income - expense, countConfirmed(fromSql, from, to, types, accounts, categories, keyword, entryId)), new Applied(from, to, statuses));
     }
     private long total(String type, String fromSql, StringBuilder where, MapSqlParameterSource base) {
         MapSqlParameterSource p = new MapSqlParameterSource();
@@ -49,10 +54,12 @@ public class JdbcFinancialEntryRepository implements FinancialEntryRepository {
         return jdbc.queryForObject("select coalesce(sum(e.amount),0)::bigint" + fromSql + criteria + " and e.type=:sumType", p, Long.class);
     }
     private long countConfirmed(String fromSql, LocalDate from, LocalDate to, List<String> types, List<UUID> accounts,
-            List<String> categories, String keyword) {
+            List<String> categories, String keyword, UUID entryId) {
         MapSqlParameterSource p = new MapSqlParameterSource().addValue("from", from).addValue("to", to)
-                .addValue("types", types).addValue("accounts", accounts).addValue("categories", categories).addValue("keyword", keyword);
+                .addValue("types", types).addValue("accounts", accounts).addValue("categories", categories)
+                .addValue("keyword", keyword).addValue("entryId", entryId);
         StringBuilder sql = new StringBuilder("select count(*)" + fromSql + " where e.transaction_date between :from and :to and e.status='CONFIRMED' ");
+        if (entryId != null) sql.append("and e.id=:entryId ");
         if (!types.isEmpty()) sql.append("and e.type in (:types) ");
         if (!accounts.isEmpty()) sql.append("and e.account_id in (:accounts) ");
         if (!categories.isEmpty()) sql.append("and e.category_code in (:categories) ");
@@ -83,7 +90,7 @@ public class JdbcFinancialEntryRepository implements FinancialEntryRepository {
         return id;
     }
     @Override public Optional<Entry> find(UUID id) {
-        List<Entry> rows=jdbc.query("select e.*,a.name account_name,a.active account_active,a.type account_type,a.display_order account_order,c.name category_name,c.type category_type,c.active category_active,c.display_order category_order,u.display_name created_by_name from financial_entry e join finance_account a on a.id=e.account_id join finance_category c on c.code=e.category_code join admin_user u on u.id=e.created_by where e.id=:id",Map.of("id",id),this::entry);
+        List<Entry> rows=jdbc.query("select e.*,a.name account_name,a.active account_active,a.type account_type,a.display_order account_order,c.name category_name,c.type category_type,c.active category_active,c.display_order category_order,u.display_name created_by_name,coalesce(payment_source.billing_id,refund_source.billing_id) source_billing_id,import_source.batch_id import_batch_id from financial_entry e join finance_account a on a.id=e.account_id join finance_category c on c.code=e.category_code join admin_user u on u.id=e.created_by left join tuition_payment payment_source on e.source_type='TUITION_PAYMENT' and payment_source.id=e.source_id left join tuition_refund refund_source on e.source_type='TUITION_REFUND' and refund_source.id=e.source_id left join financial_import_row import_source on e.source_type='IMPORT' and import_source.id=e.source_id where e.id=:id",Map.of("id",id),this::entry);
         return rows.stream().findFirst();
     }
     @Override public int cancel(UUID id,long version,UUID actor,String reason) {
@@ -99,6 +106,7 @@ public class JdbcFinancialEntryRepository implements FinancialEntryRepository {
         UUID creatorId=r.getObject("created_by",UUID.class); String source=r.getString("source_type"),status=r.getString("status");
         return new Entry(r.getObject("id",UUID.class),r.getObject("transaction_date",LocalDate.class),r.getString("type"),account,category,
                 r.getString("description"),r.getBigDecimal("amount").longValueExact(),status,source,r.getObject("source_id",UUID.class),r.getString("external_id"),
+                r.getObject("source_billing_id",UUID.class),r.getObject("import_batch_id",UUID.class),
                 new Creator(creatorId,r.getString("created_by_name")),r.getObject("created_at",OffsetDateTime.class),r.getObject("cancelled_at",OffsetDateTime.class),
                 r.getString("cancel_reason"),r.getLong("version"),new Actions("CONFIRMED".equals(status)&&List.of("MANUAL","IMPORT").contains(source)));
     }

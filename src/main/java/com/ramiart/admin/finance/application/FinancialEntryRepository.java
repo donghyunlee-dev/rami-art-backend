@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public interface FinancialEntryRepository {
     EntryPage list(LocalDate from, LocalDate to, List<String> types, List<UUID> accountIds,
-            List<String> categoryCodes, List<String> statuses, String keyword, int page, int size);
+            List<String> categoryCodes, List<String> statuses, String keyword, UUID entryId, int page, int size);
     Options options();
     boolean validAccount(UUID id);
     boolean validCategory(String code, String type);

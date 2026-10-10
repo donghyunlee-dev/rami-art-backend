@@ -85,6 +85,31 @@ class TuitionBillingRepositoryIntegrationTest {
 
     @AfterAll void stopPostgres() throws IOException { POSTGRES.close(); }
 
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT previews an unallocated credit refund before confirmation")
+    void refundPreviewCalculatesBillingImpactWithoutSelectingOnePayment() {
+        jdbc.update("update tuition_billing set adjustment_amount=-140000,payment_status='CREDIT' where id=?",billingId);
+        try {
+            var service=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(
+                    new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),
+                    java.time.Clock.systemUTC());
+            var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_ADJUSTMENT_READ");
+
+            var preview=service.preview(billingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.PreviewRequest(null,null,null,5000L,null,null),
+                    authentication);
+
+            assertThat(preview).containsEntry("valid",true);
+            Map<?,?> after=(Map<?,?>)preview.get("after");
+            assertThat(after.get("confirmedRefundAmount")).isEqualTo(5000L);
+            assertThat(after.get("netPaidAmount")).isEqualTo(45000L);
+            assertThat(after.get("balance")).isEqualTo(-5000L);
+            assertThat(after.get("refundableAmount")).isEqualTo(5000L);
+        } finally {
+            jdbc.update("update tuition_billing set adjustment_amount=-10000,payment_status='PARTIALLY_PAID' where id=?",billingId);
+        }
+    }
+
     @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T015/T017 overdue filter and month summary")
     void overdueFilterAndSummaryUseAdjustmentAndRefundAwareBalance() {
         LocalDate today=LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
@@ -159,10 +184,20 @@ class TuitionBillingRepositoryIntegrationTest {
         var created=paymentTransactions.execute(status->service.create(billingId,request,key,metadata,authentication));
         var payment=(Map<?,?>)created.get("payment");
         UUID paymentId=(UUID)payment.get("paymentId");
+        UUID financialEntryId=(UUID)payment.get("financialEntryId");
         assertThat(payment.get("status")).isEqualTo("CONFIRMED");
         assertThat(((Map<?,?>)created.get("billing")).get("version")).isEqualTo(4L);
         assertThat(jdbc.queryForObject("select paid_amount from tuition_billing where id=?",Long.class,billingId)).isEqualTo(51000L);
         assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_PAYMENT' and source_id=? and status='CONFIRMED'",Integer.class,paymentId)).isEqualTo(1);
+        var ledger=new com.ramiart.admin.finance.infrastructure.JdbcFinancialEntryRepository(
+                new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource));
+        var traced=ledger.list(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),
+                List.of(),List.of(),List.of(),List.of("CONFIRMED","CANCELLED"),null,financialEntryId,0,20);
+        assertThat(traced.items()).hasSize(1);
+        assertThat(traced.items().getFirst().entryId()).isEqualTo(financialEntryId);
+        assertThat(traced.items().getFirst().sourceBillingId()).isEqualTo(billingId);
+        assertThat(traced.totals().income()).isEqualTo(1000L);
+        assertThat(traced.totals().count()).isEqualTo(1L);
         assertThat(jdbc.queryForObject("select a.type from financial_entry e join finance_account a on a.id=e.account_id where e.source_id=?",String.class,paymentId)).isEqualTo("CASH");
         assertThat(((List<?>)service.list(billingId,null,20,authentication).get("payments"))).hasSize(1);
         var replay=paymentTransactions.execute(status->service.create(billingId,request,key,metadata,authentication));

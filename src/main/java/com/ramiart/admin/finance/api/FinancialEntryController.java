@@ -39,9 +39,10 @@ public final class FinancialEntryController {
             @RequestParam(required=false) LocalDate to, @RequestParam(required=false) List<String> types,
             @RequestParam(required=false) List<UUID> accountIds, @RequestParam(required=false) List<String> categoryCodes,
             @RequestParam(required=false) List<String> statuses, @RequestParam(required=false) String keyword,
+            @RequestParam(required=false) UUID entryId,
             @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="20") int size,
             Authentication auth, HttpServletRequest request) {
-        return ok(service.list(from,to,types,accountIds,categoryCodes,statuses,keyword,page,size,auth),request);
+        return ok(service.list(from,to,types,accountIds,categoryCodes,statuses,keyword,entryId,page,size,auth),request);
     }
     @GetMapping("/finance-ledger-options")
     ResponseEntity<ApiEnvelope<Options>> options(Authentication auth,HttpServletRequest request) { return ok(service.options(auth),request); }
