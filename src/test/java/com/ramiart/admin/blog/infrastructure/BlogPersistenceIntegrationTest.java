@@ -18,6 +18,7 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -96,6 +97,27 @@ class BlogPersistenceIntegrationTest {
         assertThatThrownBy(()->service.publish(created.postId(),new Publish(created.draftId(),1),actor,UUID.randomUUID(),metadata()))
                 .isInstanceOf(BlogException.class).hasMessage("BLOG_DRAFT_VERSION_CONFLICT");
         assertThat(jdbc.queryForObject("select status from blog_post where id=?",String.class,created.draftId())).isEqualTo("DRAFT");
+    }
+
+    @Test void adminListSupportsDefaultQueryAndTitleSearchForPublishedPostsWithDrafts() {
+        UUID actor=jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);
+        var created=service.create(new Write("여름 전시 이야기","요약","CLASS_STORY","<p>본문</p>",null,null,false),
+                actor,UUID.randomUUID(),metadata());
+        service.publish(created.postId(),new Publish(created.draftId(),created.version()),actor,UUID.randomUUID(),metadata());
+        var draft=service.createDraft(created.postId(),actor,UUID.randomUUID(),metadata());
+
+        var defaultPage=service.list(null,List.of(),List.of(),"UPDATED_DESC",0,20);
+        assertThat(defaultPage.sort()).isEqualTo("UPDATED_DESC");
+        assertThat(defaultPage.items()).anySatisfy(item -> {
+            assertThat(item.postId()).isEqualTo(created.postId());
+            assertThat(item.displayTitle()).isEqualTo("여름 전시 이야기");
+            assertThat(item.published()).isNotNull();
+            assertThat(item.draft()).isNotNull();
+            assertThat(item.draft().revision()).isEqualTo(draft.revision());
+        });
+
+        var searchPage=service.list("전시",List.of(),List.of(),"UPDATED_DESC",0,20);
+        assertThat(searchPage.items()).extracting(item -> item.postId()).contains(created.postId());
     }
 
     private static BlogService.RequestMetadata metadata() { return new BlogService.RequestMetadata("req_blog_test","127.0.0.1","integration"); }

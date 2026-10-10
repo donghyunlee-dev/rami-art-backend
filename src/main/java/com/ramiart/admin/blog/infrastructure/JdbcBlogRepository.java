@@ -43,7 +43,7 @@ public class JdbcBlogRepository implements BlogRepository {
                  where b.status in ('DRAFT','PUBLISHED')
                    and b.id=coalesce((select x.id from blog_post x where x.post_id=b.post_id and x.status='DRAFT'),
                                      (select x.id from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED'))
-                   and (:keyword is null or coalesce(b.title,(select x.title from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED')) ilike '%' || :keyword || '%')
+                   and (cast(:keyword as text) is null or coalesce(b.title,(select x.title from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED')) ilike '%' || cast(:keyword as text) || '%')
                    and (cardinality(cast(:categories as text[]))=0 or coalesce(b.category,(select x.category from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED'))=any(cast(:categories as text[])))
                    and (cardinality(cast(:states as text[]))=0
                      or ('DRAFT_ONLY'=any(cast(:states as text[])) and b.status='DRAFT' and not exists(select 1 from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED'))
@@ -62,7 +62,7 @@ public class JdbcBlogRepository implements BlogRepository {
                   left join lateral (select * from blog_post x where x.post_id=b.post_id and x.status='DRAFT') d on true
                   left join lateral (select * from blog_post x where x.post_id=b.post_id and x.status='PUBLISHED') p on true
                  where b.status in ('DRAFT','PUBLISHED')
-                   and (:keyword is null or coalesce(d.title,p.title) ilike '%' || :keyword || '%')
+                   and (cast(:keyword as text) is null or coalesce(d.title,p.title) ilike '%' || cast(:keyword as text) || '%')
                    and (cardinality(cast(:categories as text[]))=0 or coalesce(d.category,p.category)=any(cast(:categories as text[])))
                    and (cardinality(cast(:states as text[]))=0
                      or ('DRAFT_ONLY'=any(cast(:states as text[])) and d.id is not null and p.id is null)
