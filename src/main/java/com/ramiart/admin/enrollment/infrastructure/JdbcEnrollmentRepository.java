@@ -19,7 +19,8 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             .param("id",id).query((r,n)->new InquiryLead(r.getObject(1,UUID.class),r.getBytes(2),r.getBytes(3),r.getObject(4,UUID.class))).optional();}
     public Optional<UUID> findCaseByInquiry(UUID id){return jdbc.sql("select id from enrollment_case where inquiry_id=:id").param("id",id).query(UUID.class).optional();}
     public CaseRecordsPage findPage(List<String> statuses,UUID courseId,Instant from,Instant to,int page,int size){
-        String where=" where e.status=any(cast(:statuses as text[])) and (:course is null or e.desired_course_id=:course) and e.updated_at>=:from and e.updated_at<:to";
+        String where=" where e.status=any(cast(:statuses as text[])) and e.updated_at>=:from and e.updated_at<:to";
+        if(courseId!=null)where+=" and e.desired_course_id=:course";
         var count=jdbc.sql("select count(*) from enrollment_case e"+where);bind(count,statuses,courseId,from,to);long total=count.query(Long.class).single();
         var query=jdbc.sql(baseSelect()+where+" order by e.updated_at desc,e.id limit :size offset :offset");bind(query,statuses,courseId,from,to);query.param("size",size).param("offset",page*size);
         return new CaseRecordsPage(query.query(this::mapCase).list(),total);
@@ -96,7 +97,7 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
               coalesce((select count(distinct a.student_id) from student_schedule_assignment a join schedule_slot ss on ss.id=a.schedule_slot_id where ss.class_group_id=g.id and current_date between a.effective_from and coalesce(a.effective_to,'infinity'::date)),0) occupancy
             from enrollment_case e left join course c on c.id=e.desired_course_id left join class_group g on g.id=e.desired_class_group_id
             """;}
-    private void bind(JdbcClient.StatementSpec q,List<String>s,UUID c,Instant f,Instant t){q.param("statuses",s.toArray(String[]::new)).param("course",c).param("from",odt(f)).param("to",odt(t));}
+    private void bind(JdbcClient.StatementSpec q,List<String>s,UUID c,Instant f,Instant t){q.param("statuses",s.toArray(String[]::new)).param("from",odt(f)).param("to",odt(t));if(c!=null)q.param("course",c);}
     private CaseRecord mapCase(ResultSet r,int n)throws SQLException{return new CaseRecord(r.getObject("id",UUID.class),r.getObject("inquiry_id",UUID.class),r.getBytes("lead_name_ciphertext"),r.getBytes("phone_ciphertext"),r.getString("phone_hash"),r.getString("phone_last4"),r.getString("status"),r.getObject("desired_course_id",UUID.class),r.getString("course_name"),r.getObject("desired_class_group_id",UUID.class),r.getString("group_name"),instant(r,"trial_starts_at"),instant(r,"waitlisted_at"),r.getObject("student_id",UUID.class),r.getString("lost_reason"),r.getLong("version"),instant(r,"updated_at"),r.getInt("capacity"),r.getInt("occupancy"));}
     private ActivityRecord mapActivity(ResultSet r,int n)throws SQLException{return new ActivityRecord(r.getObject("id",UUID.class),r.getLong("sequence"),r.getString("type"),r.getString("from_status"),r.getString("to_status"),r.getString("channel"),r.getString("outcome"),r.getBytes("note_ciphertext"),instant(r,"occurred_at"),r.getObject("created_by",UUID.class));}
     private static Instant instant(ResultSet r,String c)throws SQLException{OffsetDateTime v=r.getObject(c,OffsetDateTime.class);return v==null?null:v.toInstant();}

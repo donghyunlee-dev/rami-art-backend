@@ -9,6 +9,9 @@ import com.ramiart.admin.enrollment.application.EnrollmentService.RequestMetadat
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin/enrollments")
 public final class EnrollmentController {
+    private static final Logger LOGGER=LoggerFactory.getLogger(EnrollmentController.class);
     private final EnrollmentService service;
     public EnrollmentController(EnrollmentService service){this.service=service;}
 
@@ -45,6 +49,18 @@ public final class EnrollmentController {
         case "ENROLLMENT_CASE_EXISTS","ENROLLMENT_VERSION_CONFLICT","ENROLLMENT_CAPACITY_FULL","IDEMPOTENCY_KEY_REUSED","IDEMPOTENCY_IN_PROGRESS"->HttpStatus.CONFLICT;
         case "ENROLLMENT_CONSENT_REQUIRED","ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED","ENROLLMENT_INVALID_TRANSITION","ENROLLMENT_PREVIEW_REQUIRED","ENROLLMENT_SLOT_INVALID"->HttpStatus.UNPROCESSABLE_ENTITY;
         default->HttpStatus.BAD_REQUEST;};Map<String,Object> value=new LinkedHashMap<>();value.put("code",exception.code());value.put("message",message(exception.code()));if(!exception.details().isEmpty())value.put("details",exception.details());return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("success",false,"error",value,"requestId",RequestIdFilter.get(request)));}
+
+    @ExceptionHandler(DataAccessException.class)
+    ResponseEntity<ApiEnvelope<Void>> persistence(DataAccessException exception,HttpServletRequest request){
+        String requestId=RequestIdFilter.get(request);
+        LOGGER.error("Enrollment database request failed: requestId={}, method={}, path={}",
+                requestId,request.getMethod(),request.getRequestURI());
+        boolean read="GET".equals(request.getMethod());
+        String code=read?"ENROLLMENT_READ_FAILED":"ENROLLMENT_WRITE_FAILED";
+        String message=read?"상담 등록 목록을 불러오지 못했습니다.":"상담 등록 요청을 처리하지 못했습니다.";
+        return ResponseEntity.internalServerError().cacheControl(CacheControl.noStore())
+                .body(ApiEnvelope.failure(code,message,List.of(),requestId));
+    }
 
     private static String message(String code){return switch(code){case "ENROLLMENT_CASE_EXISTS"->"이미 연결된 등록 상담이 있습니다.";case "ENROLLMENT_VERSION_CONFLICT"->"다른 관리자가 먼저 변경했습니다.";case "ENROLLMENT_CAPACITY_FULL"->"반 정원이 마감되었습니다.";case "ENROLLMENT_CONSENT_REQUIRED"->"필수 동의가 필요합니다.";case "ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED"->"중복 후보 확인이 필요합니다.";case "ENROLLMENT_INVALID_TRANSITION"->"현재 단계에서 허용되지 않는 변경입니다.";case "ENROLLMENT_PREVIEW_REQUIRED"->"등록 영향을 다시 확인해 주세요.";default->"입력값을 확인해 주세요.";};}
     private static UUID actor(Authentication value){return UUID.fromString(value.getName());}

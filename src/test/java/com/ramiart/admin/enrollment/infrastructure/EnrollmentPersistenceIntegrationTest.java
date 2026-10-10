@@ -2,9 +2,14 @@ package com.ramiart.admin.enrollment.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
+import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.ramiart.admin.enrollment.api.EnrollmentController;
 import com.ramiart.admin.enrollment.application.EnrollmentException;
 import com.ramiart.admin.enrollment.application.EnrollmentModels.*;
 import com.ramiart.admin.enrollment.application.EnrollmentService;
@@ -27,6 +32,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 @SpringBootTest(classes=EnrollmentPersistenceIntegrationTest.TestConfiguration.class,
         webEnvironment=SpringBootTest.WebEnvironment.NONE)
@@ -84,6 +90,32 @@ class EnrollmentPersistenceIntegrationTest {
         assertThatThrownBy(()->service.enroll(second.id(),enroll(second.version(),group,slot,policy,"010-3333-4444",null,fullPreview.previewToken()),actor,UUID.randomUUID(),meta("full")))
                 .isInstanceOf(EnrollmentException.class).extracting("code").isEqualTo("ENROLLMENT_CAPACITY_FULL");
         assertThat(jdbc.queryForObject("select count(*) from student",Integer.class)).isOne();
+    }
+
+    @Test void defaultListIncludesNewlyCreatedCaseAndReturnsEmptyListWhenNoneExist() throws Exception {
+        var mvc=MockMvcBuilders.standaloneSetup(new EnrollmentController(service))
+                .addFilters(new RequestIdFilter()).build();
+        assertThat(mvc.perform(get("/api/admin/enrollments?page=0&size=20"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
+                .contains("\"totalElements\":0");
+        UUID actor=actor();
+        CaseDetail created=service.create(new CaseCreate(null,"목록 상담","010-9876-5432",null,null),
+                actor,UUID.randomUUID(),meta("list-create"));
+
+        mvc.perform(get("/api/admin/enrollments?page=0&size=20").header("X-Request-Id","req_enrollment_list_data"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestId").value("req_enrollment_list_data"))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.totalPages").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(created.id().toString()))
+                .andExpect(jsonPath("$.data.items[0].status").value("NEW"))
+                .andExpect(jsonPath("$.data.items[0].phoneLast4").value("5432"));
+        mvc.perform(get("/api/admin/enrollments?statuses=NEW&page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+        mvc.perform(get("/api/admin/enrollments?statuses=CONTACTED&page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
     }
 
     private void fixture(UUID actor,UUID course,UUID group,UUID slot,UUID policy,int capacity){
