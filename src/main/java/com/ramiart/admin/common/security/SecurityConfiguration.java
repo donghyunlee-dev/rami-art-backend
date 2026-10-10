@@ -272,6 +272,13 @@ public class SecurityConfiguration {
                                 .hasAuthority("SCHEDULE_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/monthly-schedules/*/publications")
                                 .hasAuthority("SCHEDULE_PUBLISH")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/lesson-logs", "/api/admin/lesson-logs/session/*")
+                                .hasAuthority("LESSON_LOG_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/lesson-logs/session/*/draft",
+                                "/api/admin/lesson-logs/*/finalize", "/api/admin/lesson-logs/*/amendments")
+                                .hasAuthority("LESSON_LOG_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/lesson-logs/*")
+                                .hasAuthority("LESSON_LOG_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/makeups", "/api/admin/makeups/**")
                                 .authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/admin/makeups/*/reservations",

@@ -26,6 +26,10 @@ public final class LessonLogModels {
     public record View(Session session, List<String> assignedStaff, List<Target> attendanceTargets,
             PlanItem planItem, Log currentLog, List<Revision> revisionHistory,
             List<UUID> missingRequiredStudentIds, boolean finalizable) {}
+    public record ListItem(UUID sessionId, LocalDate date, String className, OffsetDateTime startsAt,
+            OffsetDateTime endsAt, String assignedStaff, String planTitle, int targetCount,
+            String logStatus, Integer revision) {}
+    public record LessonLogPage(int page, int size, long totalElements, int totalPages, List<ListItem> items) {}
 
     public record StudentRecordWrite(UUID studentId, String attendanceStatusSnapshot, String participation,
             String progressNote, String observation, String absenceNote, List<UUID> artworkAssetIds) {}

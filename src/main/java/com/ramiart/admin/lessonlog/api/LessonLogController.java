@@ -4,6 +4,7 @@ import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.lessonlog.application.LessonLogModels.AmendmentWrite;
 import com.ramiart.admin.lessonlog.application.LessonLogModels.FinalizeWrite;
+import com.ramiart.admin.lessonlog.application.LessonLogModels.LessonLogPage;
 import com.ramiart.admin.lessonlog.application.LessonLogModels.RequestMetadata;
 import com.ramiart.admin.lessonlog.application.LessonLogModels.SaveWrite;
 import com.ramiart.admin.lessonlog.application.LessonLogModels.View;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -38,6 +40,14 @@ public final class LessonLogController {
     private static final Logger LOG=LoggerFactory.getLogger(LessonLogController.class);
     private final LessonLogService service;
     public LessonLogController(LessonLogService service) { this.service=service; }
+
+    @GetMapping("")
+    ResponseEntity<ApiEnvelope<LessonLogPage>> list(@RequestParam String month,
+            @RequestParam(required=false) String keyword,@RequestParam(defaultValue="ALL") String status,
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,
+            Authentication auth,HttpServletRequest request) {
+        return ok(service.list(month,keyword,status,page,size,auth),request);
+    }
 
     @GetMapping("/session/{sessionId}")
     ResponseEntity<ApiEnvelope<View>> get(@PathVariable UUID sessionId,Authentication auth,HttpServletRequest request) {

@@ -119,6 +119,47 @@ class LessonLogPersistenceIntegrationTest {
                 .isInstanceOf(LessonLogException.class).extracting("code").isEqualTo("LESSON_LOG_ATTENDANCE_INCOMPLETE");
     }
 
+    @Test void listFiltersClosedSessionsAndReturnsTheLatestLogState() {
+        String className="수업 기록 통합 반-"+UUID.randomUUID().toString().substring(0,8);
+        Fixture f=fixture(className);
+        String month=LocalDate.now(ZoneId.of("Asia/Seoul")).toString().substring(0,7);
+        LessonLogPage missing=service.list(month,className,"MISSING",0,20,auth);
+        assertThat(missing.totalElements()).isEqualTo(1);
+        assertThat(missing.items()).singleElement().satisfies(item->{
+            assertThat(item.sessionId()).isEqualTo(f.sessionId());
+            assertThat(item.className()).isEqualTo(className);
+            assertThat(item.targetCount()).isEqualTo(2);
+            assertThat(item.logStatus()).isEqualTo("MISSING");
+            assertThat(item.revision()).isNull();
+        });
+        assertThat(service.list(month,"없는 반-"+UUID.randomUUID(),"ALL",0,20,auth).items()).isEmpty();
+
+        View draft=service.createDraft(f.sessionId(),auth,metadata);
+        LessonLogPage draftPage=service.list(month,null,"DRAFT",0,20,auth);
+        assertThat(draftPage.items()).singleElement().satisfies(item->{
+            assertThat(item.logStatus()).isEqualTo("DRAFT");
+            assertThat(item.revision()).isEqualTo(1);
+        });
+        SaveWrite write=new SaveWrite(0,null,"실제 수업",List.of("활동"),List.of(),null,null,List.of(
+                new StudentRecordWrite(f.presentStudentId(),"PRESENT","NORMAL",null,null,null,List.of()),
+                new StudentRecordWrite(f.absentStudentId(),"ABSENT",null,null,null,null,List.of())));
+        service.save(draft.currentLog().id(),write,auth,metadata);
+        service.finalizeLog(draft.currentLog().id(),new FinalizeWrite(1),UUID.randomUUID(),auth,metadata);
+        LessonLogPage finalized=service.list(month,className,"FINALIZED",0,20,auth);
+        assertThat(finalized.items()).singleElement().satisfies(item->{
+            assertThat(item.logStatus()).isEqualTo("FINALIZED");
+            assertThat(item.revision()).isEqualTo(1);
+        });
+        assertThat(service.list(month,className,"MISSING",0,20,auth).items()).isEmpty();
+    }
+
+    @Test void lessonLogListRequiresReadPermission() {
+        TestingAuthenticationToken writeOnly=new TestingAuthenticationToken(actorId.toString(),"","LESSON_LOG_WRITE");
+        assertThatThrownBy(()->service.list(LocalDate.now(ZoneId.of("Asia/Seoul")).toString().substring(0,7),
+                null,"ALL",0,20,writeOnly))
+                .isInstanceOf(LessonLogException.class).extracting("code").isEqualTo("LESSON_LOG_READ_DENIED");
+    }
+
     @Test void saveRejectsStudentRecordsWithUnknownAttendanceState() {
         Fixture f=fixture(); View draft=service.createDraft(f.sessionId(),auth,metadata);
         jdbc.update("delete from student_attendance where attendance_session_id=? and student_id=?",f.sessionId(),f.presentStudentId());
@@ -164,6 +205,9 @@ class LessonLogPersistenceIntegrationTest {
     }
 
     private Fixture fixture() {
+        return fixture("수업 기록 통합 반");
+    }
+    private Fixture fixture(String className) {
         UUID course=UUID.randomUUID(),group=UUID.randomUUID(),slot=UUID.randomUUID(),schedule=UUID.randomUUID(),item=UUID.randomUUID();
         UUID present=UUID.randomUUID(),absent=UUID.randomUUID(),session=UUID.randomUUID();
         LocalDate today=LocalDate.now(ZoneId.of("Asia/Seoul"));
@@ -178,7 +222,7 @@ class LessonLogPersistenceIntegrationTest {
         jdbc.update("insert into student(id,student_name,student_name_search,joined_at,created_by,updated_by) values(?,?,?,?,?,?)",present,"출석 원생","출석원생",today.minusDays(10),actorId,actorId);
         jdbc.update("insert into student(id,student_name,student_name_search,joined_at,created_by,updated_by) values(?,?,?,?,?,?)",absent,"결석 원생","결석원생",today.minusDays(10),actorId,actorId);
         jdbc.update("insert into attendance_session(id,schedule_item_id,schedule_slot_id,class_group_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count) values(?,?,?,?,?,?,?, ?,?,2)",
-                session,item,slot,group,today,"수업 기록 통합 반","ROOM_A",today.atTime(LocalTime.of(10,0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),today.atTime(LocalTime.of(11,0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+                session,item,slot,group,today,className,"ROOM_A",today.atTime(LocalTime.of(10,0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),today.atTime(LocalTime.of(11,0)).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
         jdbc.update("insert into attendance_session_student(attendance_session_id,student_id,student_name_snapshot,display_order) values(?,?,?,0),(?,?,?,1)",session,present,"출석 원생",session,absent,"결석 원생");
         jdbc.update("insert into student_attendance(id,attendance_session_id,student_id,status,reason,checked_by,updated_by) values(?,?,?,'PRESENT',null,?,?),(?,?,?,'ABSENT','결석 처리',?,?)",
                 UUID.randomUUID(),session,present,actorId,actorId,UUID.randomUUID(),session,absent,actorId,actorId);

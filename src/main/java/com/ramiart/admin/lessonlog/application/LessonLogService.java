@@ -9,6 +9,7 @@ import com.ramiart.admin.student.application.StudentDataProtector;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -38,6 +39,27 @@ public class LessonLogService {
         Session session=session(sessionId,false);
         scope(actor,session);
         return view(session,auth);
+    }
+
+    @Transactional(readOnly=true)
+    public LessonLogPage list(String month, String keyword, String status, int page, int size, Authentication auth) {
+        UUID actor=actor(auth,"LESSON_LOG_READ");
+        if(month==null||!month.matches("\\d{4}-(0[1-9]|1[0-2])")||page<0||!(size==10||size==20||size==50))
+            throw new LessonLogException("VALIDATION_ERROR");
+        YearMonth selectedMonth;
+        try { selectedMonth=YearMonth.parse(month); }
+        catch(RuntimeException exception) { throw new LessonLogException("VALIDATION_ERROR"); }
+        String normalizedStatus=status==null?"ALL":status;
+        if(!Set.of("ALL","MISSING","DRAFT","FINALIZED").contains(normalizedStatus))
+            throw new LessonLogException("VALIDATION_ERROR");
+        String normalizedKeyword=trim(keyword);
+        if(normalizedKeyword!=null&&normalizedKeyword.length()>50) throw new LessonLogException("VALIDATION_ERROR");
+        ListQuery query=new ListQuery(selectedMonth.atDay(1),selectedMonth.plusMonths(1).atDay(1),normalizedKeyword,
+                normalizedStatus,actor,repository.isOwner(actor),page,size);
+        long total=repository.countList(query);
+        List<ListItem> items=repository.listSessions(query);
+        int totalPages=(int)((total+size-1)/size);
+        return new LessonLogPage(page,size,total,totalPages,items);
     }
 
     @Transactional

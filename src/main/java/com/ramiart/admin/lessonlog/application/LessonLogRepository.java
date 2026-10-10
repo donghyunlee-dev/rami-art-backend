@@ -8,6 +8,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface LessonLogRepository {
+    record ListQuery(java.time.LocalDate from, java.time.LocalDate toExclusive, String keyword,
+            String status, UUID actorId, boolean owner, int page, int size) {
+        public long offset() { return (long) page * size; }
+    }
     record StoredLog(UUID id, UUID sessionId, int revision, String status, UUID basedOnLogId,
             UUID planItemId, String actualTitle, List<String> activities, List<String> materials,
             String changeReason, byte[] overallNoteCiphertext, String amendReason, long version,
@@ -20,6 +24,8 @@ public interface LessonLogRepository {
             List<UUID> artworkAssetIds) {}
 
     Optional<Session> findSession(UUID sessionId, boolean lock);
+    long countList(ListQuery query);
+    List<ListItem> listSessions(ListQuery query);
     List<String> assignedStaff(UUID classGroupId, java.time.LocalDate onDate);
     boolean isOwner(UUID actorId);
     boolean managesSession(UUID actorId, UUID classGroupId, java.time.LocalDate onDate);

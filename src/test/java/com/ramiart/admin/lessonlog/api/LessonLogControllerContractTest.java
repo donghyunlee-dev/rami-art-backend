@@ -16,7 +16,7 @@ class LessonLogControllerContractTest {
         Class<?> controller = Class.forName("com.ramiart.admin.lessonlog.api.LessonLogController");
         assertThat(controller.getAnnotation(RequestMapping.class).value()).containsExactly("/api/admin/lesson-logs");
 
-        assertThat(mapping(controller, GetMapping.class)).contains("/session/{sessionId}");
+        assertThat(mapping(controller, GetMapping.class)).contains("", "/session/{sessionId}");
         assertThat(mapping(controller, PostMapping.class)).contains(
                 "/session/{sessionId}/draft", "/{logId}/finalize", "/{logId}/amendments");
         assertThat(mapping(controller, PutMapping.class)).containsExactly("/{logId}");

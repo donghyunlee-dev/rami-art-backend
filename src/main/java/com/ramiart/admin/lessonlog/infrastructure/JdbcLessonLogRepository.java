@@ -41,6 +41,74 @@ public class JdbcLessonLogRepository implements LessonLogRepository {
                         r.getObject("lesson_plan_item_id", UUID.class))).optional();
     }
 
+    @Override public long countList(ListQuery query) {
+        return jdbc.sql("select count(*) " + listFrom() + " where " + listWhere())
+                .param("from", query.from()).param("to", query.toExclusive()).param("actor", query.actorId())
+                .param("owner", query.owner()).param("keyword", pattern(query.keyword()))
+                .param("hasKeyword", query.keyword()!=null)
+                .param("status", query.status()).query(Long.class).single();
+    }
+
+    @Override public List<ListItem> listSessions(ListQuery query) {
+        return jdbc.sql("""
+                select s.id,s.attendance_date,s.class_name_snapshot,s.starts_at,s.ends_at,
+                       coalesce((select string_agg(distinct staff.display_name, ' · ' order by staff.display_name)
+                           from class_staff_assignment assignment
+                           join staff_profile staff on staff.id=assignment.staff_profile_id
+                          where assignment.class_group_id=s.class_group_id
+                            and assignment.effective_from<=s.attendance_date
+                            and coalesce(assignment.effective_to,'infinity'::date)>=s.attendance_date
+                            and staff.status='ACTIVE'), '') assigned_staff,
+                       plan_item.title plan_title,s.target_count,
+                       coalesce(current_log.status,'MISSING') log_status,current_log.revision
+                  """ + listFrom() + " where " + listWhere() + " order by s.attendance_date desc,s.starts_at desc,s.id"
+                        + " limit :size offset :offset")
+                .param("from", query.from()).param("to", query.toExclusive()).param("actor", query.actorId())
+                .param("owner", query.owner()).param("keyword", pattern(query.keyword()))
+                .param("hasKeyword", query.keyword()!=null)
+                .param("status", query.status()).param("size", query.size()).param("offset", query.offset())
+                .query((r, n) -> new ListItem(r.getObject("id", UUID.class),
+                        r.getObject("attendance_date", LocalDate.class), r.getString("class_name_snapshot"),
+                        instant(r, "starts_at"), instant(r, "ends_at"), r.getString("assigned_staff"),
+                        r.getString("plan_title"), r.getInt("target_count"), r.getString("log_status"),
+                        (Integer) r.getObject("revision"))).list();
+    }
+
+    private String listFrom() {
+        return """
+                from attendance_session s
+                left join lesson_plan_item plan_item on plan_item.id=s.lesson_plan_item_id
+                left join lateral (select l.status,l.revision from lesson_log l
+                    where l.attendance_session_id=s.id order by l.revision desc limit 1) current_log on true
+                """;
+    }
+
+    private String listWhere() {
+        return """
+                s.status='CLOSED' and s.attendance_date>=:from and s.attendance_date<:to
+                  and (:owner or exists(select 1 from class_staff_assignment scope_assignment
+                      join staff_profile scope_staff on scope_staff.id=scope_assignment.staff_profile_id
+                     where scope_staff.admin_user_id=:actor and scope_staff.status='ACTIVE'
+                       and scope_assignment.class_group_id=s.class_group_id
+                       and scope_assignment.effective_from<=s.attendance_date
+                       and coalesce(scope_assignment.effective_to,'infinity'::date)>=s.attendance_date))
+                  and (not :hasKeyword or s.class_name_snapshot ilike :keyword
+                       or exists(select 1 from class_staff_assignment search_assignment
+                           join staff_profile search_staff on search_staff.id=search_assignment.staff_profile_id
+                          where search_assignment.class_group_id=s.class_group_id
+                            and search_assignment.effective_from<=s.attendance_date
+                            and coalesce(search_assignment.effective_to,'infinity'::date)>=s.attendance_date
+                            and search_staff.status='ACTIVE' and search_staff.display_name ilike :keyword))
+                  and (:status='ALL' or (:status='MISSING' and current_log.status is null)
+                       or (:status='DRAFT' and current_log.status='DRAFT')
+                       or (:status='FINALIZED' and current_log.status='FINALIZED'))
+                """;
+    }
+
+    private static String pattern(String keyword) {
+        return keyword == null ? null : "%" + keyword + "%";
+    }
+
     @Override public List<String> assignedStaff(UUID groupId, LocalDate onDate) {
         return jdbc.sql("""
                 select distinct s.display_name from class_staff_assignment a
