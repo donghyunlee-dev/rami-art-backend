@@ -57,7 +57,7 @@ public class SecurityConfiguration {
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/public/inquiries").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/blog-posts", "/api/public/blog-posts/**",
-                                "/api/public/site-brand").permitAll()
+                                "/api/public/site-brand", "/api/public/home-page-content").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/blog-posts", "/api/admin/blog-posts/**")
                                 .hasAuthority("BLOG_READ")
                         .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/summary")
@@ -182,6 +182,17 @@ public class SecurityConfiguration {
                                 .hasAuthority("SITE_BRAND_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/site-brand/draft/*/publish")
                                 .hasAuthority("SITE_BRAND_PUBLISH")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/home-page-content", "/api/admin/home-page-content/options",
+                                "/api/admin/home-page-content/revisions/*")
+                                .hasAuthority("HOME_CONTENT_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/home-page-content/drafts")
+                                .hasAuthority("HOME_CONTENT_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/home-page-content/drafts/*")
+                                .hasAuthority("HOME_CONTENT_WRITE")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/home-page-content/drafts/*/preview")
+                                .hasAuthority("HOME_CONTENT_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/home-page-content/publications")
+                                .hasAuthority("HOME_CONTENT_PUBLISH")
                         .requestMatchers(HttpMethod.GET, "/api/admin/studio-profile",
                                 "/api/admin/studio-profile/drafts/*/preview")
                                 .hasAuthority("CONTENT_PROFILE_READ")

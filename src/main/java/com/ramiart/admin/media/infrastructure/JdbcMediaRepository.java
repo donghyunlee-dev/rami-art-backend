@@ -78,12 +78,14 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'BLOG_POST' then (select x.post_id from blog_post x where x.id=r.owner_id)
                          when 'CLASS_PROGRAM' then (select x.course_id from class_program x where x.id=r.owner_id)
                          when 'SITE_BRAND_CONFIG' then r.owner_id
+                         when 'HOME_PAGE_CONTENT' then r.owner_id
                        end target_id,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then (select x.title from gallery_artwork x where x.id=r.owner_id)
                          when 'BLOG_POST' then (select x.title from blog_post x where x.id=r.owner_id)
                          when 'CLASS_PROGRAM' then (select x.title from class_program x where x.id=r.owner_id)
                          when 'SITE_BRAND_CONFIG' then (select x.brand_name from site_brand_config x where x.id=r.owner_id)
+                         when 'HOME_PAGE_CONTENT' then '홈페이지 구성'
                        end title,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then exists(
@@ -95,6 +97,7 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'BLOG_POST' then exists(select 1 from blog_post x where x.id=r.owner_id and x.status='PUBLISHED' and x.visible)
                          when 'CLASS_PROGRAM' then exists(select 1 from class_program x where x.id=r.owner_id and x.status='PUBLISHED' and x.visible)
                          when 'SITE_BRAND_CONFIG' then exists(select 1 from site_brand_config x where x.id=r.owner_id and x.status='PUBLISHED')
+                         when 'HOME_PAGE_CONTENT' then exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='PUBLISHED')
                          else false
                        end currently_public,
                        case r.owner_type
@@ -122,10 +125,14 @@ public class JdbcMediaRepository implements MediaRepository {
                            when exists(select 1 from site_brand_config x where x.id=r.owner_id and x.status='PUBLISHED') then 'PUBLIC'
                            when exists(select 1 from site_brand_config x where x.id=r.owner_id and x.status='DRAFT') then 'DRAFT'
                            else 'ARCHIVED' end
+                         when 'HOME_PAGE_CONTENT' then case
+                           when exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='PUBLISHED') then 'PUBLIC'
+                           when exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='DRAFT') then 'DRAFT'
+                           else 'ARCHIVED' end
                          else 'ARCHIVED'
                        end public_state
                   from media_asset_reference r
-                 where r.asset_id=:id and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG')
+                 where r.asset_id=:id and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG','HOME_PAGE_CONTENT')
                  order by currently_public desc, r.owner_type, r.owner_id
                 """)
                 .param("id", id).query((rs, ignored) -> new AssetReference(
