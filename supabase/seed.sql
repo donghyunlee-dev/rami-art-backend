@@ -3,7 +3,7 @@ insert into public.admin_role (id, code, name, description, display_order)
 values
     ('10000000-0000-0000-0000-000000000001', 'OWNER', '원장', '전체 운영과 보안 설정', 1),
     ('10000000-0000-0000-0000-000000000002', 'OPERATOR', '운영 관리자', '원생·수업·출석·문의 관리', 2),
-    ('10000000-0000-0000-0000-000000000003', 'CONTENT', '콘텐츠 관리자', '프로필·수업 소개·갤러리·소식 관리', 3),
+    ('10000000-0000-0000-0000-000000000003', 'CONTENT', '콘텐츠 관리자', '홈 콘텐츠·프로필·수업 소개·갤러리·소식 관리', 3),
     ('10000000-0000-0000-0000-000000000004', 'FINANCE', '재무 관리자', '수업료·입출금·정산 관리', 4)
 on conflict (code) do update set
     name = excluded.name,
@@ -57,6 +57,9 @@ values
     ('SITE_BRAND_READ', '브랜드 조회', 'SITE_BRAND', 'READ', '사이트 브랜드 설정 조회'),
     ('SITE_BRAND_WRITE', '브랜드 편집', 'SITE_BRAND', 'WRITE', '사이트 브랜드 설정 변경'),
     ('SITE_BRAND_PUBLISH', '브랜드 발행', 'SITE_BRAND', 'PUBLISH', '사이트 브랜드 설정 발행'),
+    ('HOME_CONTENT_READ', '홈 콘텐츠 조회', 'HOME_CONTENT', 'READ', '홈페이지 콘텐츠와 공개 후보 조회'),
+    ('HOME_CONTENT_WRITE', '홈 콘텐츠 편집', 'HOME_CONTENT', 'WRITE', '홈페이지 콘텐츠 초안 작성 및 변경'),
+    ('HOME_CONTENT_PUBLISH', '홈 콘텐츠 발행', 'HOME_CONTENT', 'PUBLISH', '홈페이지 콘텐츠 revision 발행'),
     ('COURSE_READ', '과정 조회', 'COURSE', 'READ', '교육 과정 조회'),
     ('COURSE_WRITE', '과정 편집', 'COURSE', 'WRITE', '교육 과정 작성 및 변경'),
     ('STAFF_READ', '강사 조회', 'STAFF', 'READ', '강사 정보 조회'),
@@ -121,7 +124,8 @@ join public.admin_permission permission on permission.code = any (array[
     'DASHBOARD_READ', 'SITE_BRAND_READ', 'SITE_BRAND_WRITE', 'SITE_BRAND_PUBLISH',
     'CONTENT_PROFILE_READ', 'CONTENT_PROFILE_WRITE', 'CONTENT_PROGRAM_READ',
     'CONTENT_PROGRAM_WRITE', 'MEDIA_WRITE', 'GALLERY_READ', 'GALLERY_WRITE',
-    'GALLERY_PUBLISH', 'BLOG_READ', 'BLOG_WRITE', 'BLOG_PUBLISH'
+    'GALLERY_PUBLISH', 'BLOG_READ', 'BLOG_WRITE', 'BLOG_PUBLISH',
+    'HOME_CONTENT_READ', 'HOME_CONTENT_WRITE', 'HOME_CONTENT_PUBLISH'
 ])
 where role.code = 'CONTENT'
 on conflict do nothing;
