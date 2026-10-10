@@ -34,6 +34,13 @@ import com.ramiart.admin.schedule.application.*;import com.ramiart.admin.schedul
       union all select 1 from schedule_override o where o.id=s.schedule_override_id and o.monthly_schedule_id=:schedule)
   """).param("schedule",schedule).param("from",from).update();}
  public int createAttendance(AttendanceOccurrence occurrence,ZoneId studioZone){
+  List<UUID> planItems=jdbc.sql("""
+   select item.id from lesson_plan plan join lesson_plan_item item on item.lesson_plan_id=plan.id
+   where plan.class_group_id=:group and plan.year_month=:month and plan.status='PUBLISHED'
+     and item.planned_date=:date
+   """).param("group",occurrence.classGroupId()).param("month",YearMonth.from(occurrence.attendanceDate()).toString())
+    .param("date",occurrence.attendanceDate()).query(UUID.class).list();
+  UUID planItemId=planItems.size()==1?planItems.getFirst():null;
   List<Object[]> targets=occurrence.scheduleSlotId()==null?List.of():jdbc.sql("""
    select a.id assignment_id,s.id student_id,s.student_name
    from student_schedule_assignment a join student s on s.id=a.student_id
@@ -43,10 +50,10 @@ import com.ramiart.admin.schedule.application.*;import com.ramiart.admin.schedul
     .query((r,n)->new Object[]{r.getObject("assignment_id",UUID.class),r.getObject("student_id",UUID.class),r.getString("student_name")}).list();
   UUID session=UUID.randomUUID(); OffsetDateTime starts=occurrence.attendanceDate().atTime(occurrence.startTime()).atZone(studioZone).toOffsetDateTime(); OffsetDateTime ends=occurrence.attendanceDate().atTime(occurrence.endTime()).atZone(studioZone).toOffsetDateTime();
   jdbc.sql("""
-   insert into attendance_session(id,schedule_item_id,schedule_override_id,schedule_slot_id,class_group_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count)
-   values(:id,:item,:override,:slot,:group,:date,:title,:room,:starts,:ends,:targets)
+   insert into attendance_session(id,schedule_item_id,schedule_override_id,schedule_slot_id,class_group_id,lesson_plan_item_id,attendance_date,class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count)
+   values(:id,:item,:override,:slot,:group,:planItem,:date,:title,:room,:starts,:ends,:targets)
    """).param("id",session).param("item",occurrence.scheduleItemId()).param("override",occurrence.scheduleOverrideId())
-    .param("slot",occurrence.scheduleSlotId()).param("group",occurrence.classGroupId()).param("date",occurrence.attendanceDate())
+    .param("slot",occurrence.scheduleSlotId()).param("group",occurrence.classGroupId()).param("planItem",planItemId).param("date",occurrence.attendanceDate())
     .param("title",occurrence.title()).param("room",occurrence.roomCode()).param("starts",starts).param("ends",ends).param("targets",targets.size()).update();
   for(int index=0;index<targets.size();index++){Object[] target=targets.get(index);jdbc.sql("insert into attendance_session_student(attendance_session_id,student_id,student_name_snapshot,display_order,assignment_id) values(:session,:student,:name,:display,:assignment)")
     .param("session",session).param("student",target[1]).param("name",target[2]).param("display",index).param("assignment",target[0]).update();}

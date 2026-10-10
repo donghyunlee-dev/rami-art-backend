@@ -10,7 +10,8 @@ public final class LessonLogModels {
     private LessonLogModels() {}
 
     public record Session(UUID id, UUID classGroupId, String classGroupName, String status,
-            LocalDate date, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID planItemId) {}
+            LocalDate date, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID planItemId,
+            String planItemLinkIssue) {}
     public record Target(UUID studentId, String studentName, String attendanceStatus, int displayOrder) {}
     public record PlanItem(UUID id, String title, List<String> activities, List<String> materials) {}
     public record StudentRecord(UUID id, UUID studentId, String attendanceStatusSnapshot, String participation,

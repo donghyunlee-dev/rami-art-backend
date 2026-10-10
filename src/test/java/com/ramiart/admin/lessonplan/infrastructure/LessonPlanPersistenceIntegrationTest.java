@@ -11,6 +11,10 @@ import com.ramiart.admin.lessonplan.application.LessonPlanModels.PlanWrite;
 import com.ramiart.admin.lessonplan.application.LessonPlanModels.PublishWrite;
 import com.ramiart.admin.lessonplan.application.LessonPlanService;
 import com.ramiart.admin.lessonplan.application.LessonPlanService.LessonPlanException;
+import com.ramiart.admin.lessonlog.infrastructure.JdbcLessonLogRepository;
+import com.ramiart.admin.lessonlog.application.LessonLogModels.Session;
+import com.ramiart.admin.schedule.application.ScheduleRepository.AttendanceOccurrence;
+import com.ramiart.admin.schedule.infrastructure.JdbcScheduleRepository;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -141,6 +145,70 @@ class LessonPlanPersistenceIntegrationTest {
     }
 
     @Test
+    void planPublicationAndScheduleCreationLinkUniquePlanItemsToSessions() {
+        ScheduleFixture fixture = scheduleFixture();
+        var auth = ownerAuth();
+        var metadata = new LessonPlanService.RequestMetadata("req_lesson_plan_session_links", "127.0.0.1", "integration-test");
+        var created = service.createDraft(fixture.classGroupId(), fixture.month().toString(), auth, metadata);
+        List<ItemWrite> items = fixture.lessonDates().stream().map(date -> new ItemWrite(UUID.randomUUID(), date, 1,
+                "색과 형태", List.of("색의 대비를 이해한다"), List.of("색종이 조형 활동"), List.of(), List.of(), null)).toList();
+        var saved = service.save(created.draft().id(), new PlanWrite(0, items), auth, metadata);
+
+        UUID beforePlanSessionId = UUID.randomUUID();
+        LocalDate beforePlanDate = fixture.lessonDates().getFirst();
+        insertAttendanceSession(beforePlanSessionId, fixture, beforePlanDate);
+        var published = service.publish(saved.draft().id(),
+                new PublishWrite(1, "월 계획 확정", fixture.scheduleRevision()), auth, UUID.randomUUID(), metadata);
+        UUID beforePlanItemId = published.published().items().stream()
+                .filter(item -> item.plannedDate().equals(beforePlanDate)).findFirst().orElseThrow().id();
+        assertThat(attendancePlanItem(beforePlanSessionId)).isEqualTo(beforePlanItemId);
+
+        LocalDate afterPlanDate = fixture.lessonDates().get(1);
+        new JdbcScheduleRepository(JdbcClient.create(dataSource)).createAttendance(new AttendanceOccurrence(
+                fixture.scheduleItemId(), null, fixture.scheduleSlotId(), fixture.classGroupId(), afterPlanDate,
+                "정기 수업", "ROOM_A", java.time.LocalTime.of(10, 0), java.time.LocalTime.of(11, 0)), ZoneId.of("Asia/Seoul"));
+        UUID afterPlanItemId = published.published().items().stream()
+                .filter(item -> item.plannedDate().equals(afterPlanDate)).findFirst().orElseThrow().id();
+        UUID afterPlanSessionId = jdbc.queryForObject("select id from attendance_session where schedule_item_id=? and attendance_date=?",
+                UUID.class, fixture.scheduleItemId(), afterPlanDate);
+        assertThat(attendancePlanItem(afterPlanSessionId)).isEqualTo(afterPlanItemId);
+    }
+
+    @Test
+    void scheduleCreationDoesNotGuessWhenMultiplePlanItemsShareTheDate() {
+        ScheduleFixture fixture = scheduleFixture();
+        var auth = ownerAuth();
+        var metadata = new LessonPlanService.RequestMetadata("req_lesson_plan_ambiguous", "127.0.0.1", "integration-test");
+        var created = service.createDraft(fixture.classGroupId(), fixture.month().toString(), auth, metadata);
+        LocalDate ambiguousDate = fixture.lessonDates().getFirst();
+        List<ItemWrite> items = new ArrayList<>();
+        items.add(new ItemWrite(UUID.randomUUID(), ambiguousDate, 1, "첫 번째 수업", List.of("목표"),
+                List.of("활동"), List.of(), List.of(), null));
+        items.add(new ItemWrite(UUID.randomUUID(), ambiguousDate, 2, "두 번째 수업", List.of("목표"),
+                List.of("활동"), List.of(), List.of(), null));
+        for (LocalDate date : fixture.lessonDates().stream().skip(1).toList()) {
+            items.add(new ItemWrite(UUID.randomUUID(), date, 1, "색과 형태", List.of("목표"),
+                    List.of("활동"), List.of(), List.of(), null));
+        }
+        var saved = service.save(created.draft().id(), new PlanWrite(0, items), auth, metadata);
+        var published = service.publish(saved.draft().id(),
+                new PublishWrite(1, "월 계획 확정", fixture.scheduleRevision()), auth, UUID.randomUUID(), metadata);
+
+        new JdbcScheduleRepository(JdbcClient.create(dataSource)).createAttendance(new AttendanceOccurrence(
+                fixture.scheduleItemId(), null, fixture.scheduleSlotId(), fixture.classGroupId(), ambiguousDate,
+                "정기 수업", "ROOM_A", java.time.LocalTime.of(10, 0), java.time.LocalTime.of(11, 0)), ZoneId.of("Asia/Seoul"));
+
+        assertThat(published.published().items()).filteredOn(item -> item.plannedDate().equals(ambiguousDate)).hasSize(2);
+        assertThat(jdbc.queryForObject("select count(*) from attendance_session where schedule_item_id=? and attendance_date=? and lesson_plan_item_id is not null",
+                Integer.class, fixture.scheduleItemId(), ambiguousDate)).isZero();
+        UUID sessionId = jdbc.queryForObject("select id from attendance_session where schedule_item_id=? and attendance_date=?",
+                UUID.class, fixture.scheduleItemId(), ambiguousDate);
+        Session session = new JdbcLessonLogRepository(JdbcClient.create(dataSource), new ObjectMapper())
+                .findSession(sessionId, false).orElseThrow();
+        assertThat(session.planItemLinkIssue()).isEqualTo("PLAN_ITEM_AMBIGUOUS");
+    }
+
+    @Test
     void lessonPlanRequiresReadPermissionAndRejectsOutOfMonthItems() {
         ScheduleFixture fixture = scheduleFixture();
         var noPermission = new TestingAuthenticationToken(ownerId.toString(), "", "STUDENT_READ");
@@ -195,13 +263,28 @@ class LessonPlanPersistenceIntegrationTest {
         jdbc.update("insert into monthly_schedule(id,year_month,revision,status,created_by) values(?,?,7,'DRAFT',?)",
                 scheduleId, month.toString(), ownerId);
         int dayOfWeek = month.atDay(1).getDayOfWeek().getValue();
+        UUID scheduleItemId = UUID.randomUUID();
         jdbc.update("insert into monthly_schedule_item(id,schedule_slot_id,monthly_schedule_id,day_of_week,start_time,end_time,title,room_code) values(?,?,?,?,'10:00','11:00','정기 수업','ROOM_A')",
-                UUID.randomUUID(), slotId, scheduleId, dayOfWeek);
+                scheduleItemId, slotId, scheduleId, dayOfWeek);
         jdbc.update("update monthly_schedule set status='PUBLISHED',published_by=?,published_at=statement_timestamp() where id=?",
                 ownerId, scheduleId);
         List<LocalDate> lessonDates = month.atDay(1).datesUntil(month.atEndOfMonth().plusDays(1))
                 .filter(date -> date.getDayOfWeek().getValue() == dayOfWeek).toList();
-        return new ScheduleFixture(classGroupId, month, 7, lessonDates);
+        return new ScheduleFixture(classGroupId, slotId, scheduleItemId, month, 7, lessonDates);
+    }
+
+    private void insertAttendanceSession(UUID sessionId, ScheduleFixture fixture, LocalDate date) {
+        jdbc.update("""
+                insert into attendance_session(id,schedule_item_id,schedule_slot_id,class_group_id,attendance_date,
+                    class_name_snapshot,room_code_snapshot,starts_at,ends_at,target_count)
+                values(?,?,?,?,?,'정기 수업','ROOM_A',?, ?,0)
+                """, sessionId, fixture.scheduleItemId(), fixture.scheduleSlotId(), fixture.classGroupId(), date,
+                date.atTime(10, 0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
+                date.atTime(11, 0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+    }
+
+    private UUID attendancePlanItem(UUID sessionId) {
+        return jdbc.queryForObject("select lesson_plan_item_id from attendance_session where id=?", UUID.class, sessionId);
     }
 
     private static EmbeddedPostgres startPostgres() {
@@ -220,5 +303,6 @@ class LessonPlanPersistenceIntegrationTest {
             if (!rows.getBoolean(1)) statement.execute("create role " + role);
         }
     }
-    private record ScheduleFixture(UUID classGroupId, YearMonth month, int scheduleRevision, List<LocalDate> lessonDates) {}
+    private record ScheduleFixture(UUID classGroupId, UUID scheduleSlotId, UUID scheduleItemId, YearMonth month,
+            int scheduleRevision, List<LocalDate> lessonDates) {}
 }

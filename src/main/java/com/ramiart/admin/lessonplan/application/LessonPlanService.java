@@ -117,7 +117,7 @@ public class LessonPlanService {
         UUID actorId = actor(authentication, "LESSON_PLAN_PUBLISH");
         if (command == null || command.version() < 0 || command.scheduleRevision() < 1 || key == null)
             throw new LessonPlanException("VALIDATION_ERROR");
-        Plan draft = repository.findPlanById(draftId, true)
+        repository.findPlanById(draftId, false)
                 .orElseThrow(() -> new LessonPlanException("LESSON_PLAN_DRAFT_NOT_FOUND"));
         Group group = groupForPlan(draftId);
         YearMonth month = parseMonthById(draftId);
@@ -135,10 +135,12 @@ public class LessonPlanService {
                     replayed.publishedByName(), replayed.publishedAt(), replayed.items());
             return new PublishResult(replayed, false);
         }
-        if (!"DRAFT".equals(draft.status())) throw new LessonPlanException("LESSON_PLAN_PUBLISHED_IMMUTABLE");
-        if (draft.version() != command.version()) throw new LessonPlanException("LESSON_PLAN_VERSION_CONFLICT");
         ScheduleSnapshot schedule = repository.scheduleSnapshot(group.id(), month.toString(), true)
                 .orElseThrow(() -> new LessonPlanException("LESSON_PLAN_SCHEDULE_NOT_FOUND"));
+        Plan draft = repository.findPlanById(draftId, true)
+                .orElseThrow(() -> new LessonPlanException("LESSON_PLAN_DRAFT_NOT_FOUND"));
+        if (!"DRAFT".equals(draft.status())) throw new LessonPlanException("LESSON_PLAN_PUBLISHED_IMMUTABLE");
+        if (draft.version() != command.version()) throw new LessonPlanException("LESSON_PLAN_VERSION_CONFLICT");
         if (schedule.revision() == null || schedule.revision() != command.scheduleRevision())
             throw new LessonPlanException("LESSON_PLAN_SCHEDULE_CHANGED");
         Diff diff = diff(schedule, draft.items(), month);
@@ -148,6 +150,7 @@ public class LessonPlanService {
         repository.archivePublished(group.id(), month.toString());
         if (repository.publish(draftId, command.version(), summary, actorId, Instant.now()) != 1)
             throw new LessonPlanException("LESSON_PLAN_VERSION_CONFLICT");
+        repository.linkAttendanceSessions(group.id(), month.toString(), draftId);
         repository.completeIdempotency(scope, key, draftId, 201);
         event(actorId, metadata, "LESSON_PLAN_PUBLISHED", draftId, Map.of("revision", draft.revision(), "scheduleRevision", schedule.revision()));
         return new PublishResult(repository.findPlanById(draftId, false).orElseThrow(), true);

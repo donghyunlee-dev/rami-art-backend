@@ -184,6 +184,23 @@ public class JdbcLessonPlanRepository implements LessonPlanRepository {
                 .param("id", planId).param("version", version).update();
     }
 
+    @Override public int linkAttendanceSessions(UUID classGroupId, String month, UUID planId) {
+        return jdbc.sql("""
+                update attendance_session session
+                   set lesson_plan_item_id = item.id
+                  from lesson_plan_item item
+                 where item.lesson_plan_id = :plan
+                   and item.planned_date = session.attendance_date
+                   and session.class_group_id = :group
+                   and session.attendance_date >= to_date(:month || '-01', 'YYYY-MM-DD')
+                   and session.attendance_date < (to_date(:month || '-01', 'YYYY-MM-DD') + interval '1 month')::date
+                   and session.status <> 'CANCELLED'
+                   and not exists (select 1 from lesson_log log where log.attendance_session_id = session.id)
+                   and (select count(*) from lesson_plan_item matching
+                         where matching.lesson_plan_id = :plan and matching.planned_date = session.attendance_date) = 1
+                """).param("plan", planId).param("group", classGroupId).param("month", month).update();
+    }
+
     @Override public boolean claimIdempotency(String scope, UUID key, String hash) {
         try {
             jdbc.sql("""

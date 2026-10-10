@@ -24,6 +24,7 @@ public interface LessonPlanRepository {
     void replaceItems(UUID planId, List<ItemWrite> items);
     int archivePublished(UUID classGroupId, String month);
     int publish(UUID planId, long version, String changeSummary, UUID actorId, Instant publishedAt);
+    int linkAttendanceSessions(UUID classGroupId, String month, UUID planId);
     boolean claimIdempotency(String scope, UUID key, String hash);
     Optional<String> idempotencyHash(String scope, UUID key);
     Optional<UUID> idempotencyResource(String scope, UUID key);

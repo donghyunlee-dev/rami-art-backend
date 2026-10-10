@@ -31,14 +31,29 @@ public class JdbcLessonLogRepository implements LessonLogRepository {
     @Override public Optional<Session> findSession(UUID id, boolean lock) {
         return jdbc.sql("""
                 select s.id,s.class_group_id,g.name class_group_name,s.status,s.attendance_date,
-                       s.starts_at,s.ends_at,s.lesson_plan_item_id
+                       s.starts_at,s.ends_at,s.lesson_plan_item_id,
+                       case
+                         when s.lesson_plan_item_id is not null then null
+                         when not exists(select 1 from lesson_plan p where p.class_group_id=s.class_group_id
+                           and p.year_month=to_char(s.attendance_date,'YYYY-MM') and p.status='PUBLISHED')
+                           then 'PLAN_NOT_PUBLISHED'
+                         when (select count(*) from lesson_plan_item item join lesson_plan p on p.id=item.lesson_plan_id
+                           where p.class_group_id=s.class_group_id and p.year_month=to_char(s.attendance_date,'YYYY-MM')
+                             and p.status='PUBLISHED' and item.planned_date=s.attendance_date)=0
+                           then 'PLAN_ITEM_NOT_FOUND'
+                         when (select count(*) from lesson_plan_item item join lesson_plan p on p.id=item.lesson_plan_id
+                           where p.class_group_id=s.class_group_id and p.year_month=to_char(s.attendance_date,'YYYY-MM')
+                             and p.status='PUBLISHED' and item.planned_date=s.attendance_date)=1
+                           then 'PLAN_LINK_MISSING'
+                         else 'PLAN_ITEM_AMBIGUOUS'
+                       end plan_item_link_issue
                   from attendance_session s join class_group g on g.id=s.class_group_id
                  where s.id=:id
                 """ + (lock ? " for update of s" : ""))
                 .param("id", id).query((r, n) -> new Session(r.getObject("id", UUID.class),
                         r.getObject("class_group_id", UUID.class), r.getString("class_group_name"), r.getString("status"),
                         r.getObject("attendance_date", LocalDate.class), instant(r, "starts_at"), instant(r, "ends_at"),
-                        r.getObject("lesson_plan_item_id", UUID.class))).optional();
+                        r.getObject("lesson_plan_item_id", UUID.class), r.getString("plan_item_link_issue"))).optional();
     }
 
     @Override public long countList(ListQuery query) {
