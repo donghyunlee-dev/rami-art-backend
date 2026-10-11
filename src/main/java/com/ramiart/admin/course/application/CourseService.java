@@ -165,7 +165,8 @@ public class CourseService {
 
     private static CourseWrite normalize(CourseWrite value) {
         return new CourseWrite(upper(value.code()), trim(value.name()), trimToNull(value.description()),
-                trimToNull(value.ageGuide()), value.displayOrder(), value.active(), value.version());
+                trimToNull(value.ageGuide()), value.sessionDurationMinutes(), value.weeklySessions(),
+                value.displayOrder(), value.active(), value.version());
     }
 
     private static ClassGroupWrite normalize(ClassGroupWrite value) {
@@ -179,6 +180,10 @@ public class CourseService {
                 || value.name() == null || value.name().isBlank() || value.name().length() > 100
                 || value.displayOrder() < 0 || (value.description() != null && value.description().length() > 500)
                 || (value.ageGuide() != null && value.ageGuide().length() > 100)
+                || ((value.sessionDurationMinutes() == null) != (value.weeklySessions() == null))
+                || (value.sessionDurationMinutes() != null && (value.sessionDurationMinutes() < 20
+                        || value.sessionDurationMinutes() > 240 || value.sessionDurationMinutes() % 5 != 0))
+                || (value.weeklySessions() != null && (value.weeklySessions() < 1 || value.weeklySessions() > 7))
                 || (update && value.version() == null)) {
             throw new CourseException("COURSE_VALIDATION_ERROR");
         }

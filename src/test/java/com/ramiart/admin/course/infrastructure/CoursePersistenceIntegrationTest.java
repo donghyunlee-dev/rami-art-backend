@@ -97,7 +97,7 @@ class CoursePersistenceIntegrationTest {
         UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
         var metadata = new CourseService.RequestMetadata("req_course_create", "127.0.0.1", "integration-test");
         UUID createKey = UUID.randomUUID();
-        var command = new CourseWrite("DRAWING", "드로잉", "기초 관찰 드로잉", "초등 이상", 10, true, null);
+        var command = new CourseWrite("DRAWING", "드로잉", "기초 관찰 드로잉", "초등 이상", null, null, 10, true, null);
 
         var created = courseService.createCourse(command, actorId, createKey, metadata);
         var replayed = courseService.createCourse(command, actorId, createKey, metadata);
@@ -118,7 +118,7 @@ class CoursePersistenceIntegrationTest {
 
         assertThatThrownBy(() -> courseService.updateCourse(created.id(), new CourseWrite(
                 created.code(), created.name(), created.description(), created.ageGuide(),
-                created.displayOrder(), false, created.version()), actorId, UUID.randomUUID(), metadata))
+                created.sessionDurationMinutes(), created.weeklySessions(), created.displayOrder(), false, created.version()), actorId, UUID.randomUUID(), metadata))
                 .isInstanceOf(CourseException.class)
                 .extracting("code").isEqualTo("COURSE_HAS_ACTIVE_GROUPS");
 
@@ -165,7 +165,7 @@ class CoursePersistenceIntegrationTest {
         UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
         var metadata = new CourseService.RequestMetadata("req_course_occupancy", "127.0.0.1", "integration-test");
         var course = courseService.createCourse(
-                new CourseWrite("PAINTING", "회화", null, null, 30, true, null),
+                new CourseWrite("PAINTING", "회화", null, null, null, null, 30, true, null),
                 actorId, UUID.randomUUID(), metadata);
         var group = courseService.createClassGroup(course.id(), new ClassGroupWrite(
                 "PAINTING_A", "회화 A", "ROOM_A", 4, true, 30,
@@ -233,13 +233,13 @@ class CoursePersistenceIntegrationTest {
     void invalidAndDuplicateCodesLeaveNoPartialRows() {
         UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
         var metadata = new CourseService.RequestMetadata("req_course_validation", "127.0.0.1", "integration-test");
-        var valid = new CourseWrite("CERAMIC", "도예", null, null, 20, true, null);
+        var valid = new CourseWrite("CERAMIC", "도예", null, null, null, null, 20, true, null);
         courseService.createCourse(valid, actorId, UUID.randomUUID(), metadata);
 
         assertThatThrownBy(() -> courseService.createCourse(valid, actorId, UUID.randomUUID(), metadata))
                 .isInstanceOf(CourseException.class).extracting("code").isEqualTo("COURSE_CODE_DUPLICATED");
         assertThatThrownBy(() -> courseService.createCourse(
-                new CourseWrite("!", "잘못된 과정", null, null, 21, true, null),
+                new CourseWrite("!", "잘못된 과정", null, null, null, null, 21, true, null),
                 actorId, UUID.randomUUID(), metadata))
                 .isInstanceOf(CourseException.class).extracting("code").isEqualTo("COURSE_VALIDATION_ERROR");
         assertThat(jdbcTemplate.queryForObject("select count(*) from course", Integer.class)).isOne();

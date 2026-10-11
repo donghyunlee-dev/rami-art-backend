@@ -121,7 +121,12 @@ public class JdbcHomePageContentRepository implements HomePageContentRepository 
         List<Option> courses = jdbc.sql("""
                 select c.id,c.name,p.revision from course c join class_program p on p.course_id=c.id
                 join media_asset a on a.id=p.media_asset_id and a.status='READY' and a.public_path is not null
-                where c.active and p.status='PUBLISHED' and p.visible order by p.display_order,c.id
+                where c.active and p.status='PUBLISHED' and p.visible
+                  and p.audience_label is not distinct from c.age_guide
+                  and p.session_duration_minutes is not distinct from c.session_duration_minutes
+                  and p.weekly_sessions is not distinct from c.weekly_sessions
+                  and c.age_guide is not null and c.session_duration_minutes is not null and c.weekly_sessions is not null
+                order by p.display_order,c.id
                 """).query((rs,row)->new Option(rs.getObject("id",UUID.class),rs.getString("name"),rs.getInt("revision"))).list();
         List<Option> artworks = jdbc.sql("""
                 select g.artwork_id,g.title,g.revision from gallery_artwork g
@@ -165,13 +170,20 @@ public class JdbcHomePageContentRepository implements HomePageContentRepository 
     private List<PublicCourse> publicCourses(List<HomeReference> refs) {
         List<PublicCourse> values = new ArrayList<>();
         for (HomeReference ref : refs) jdbc.sql("""
-                select c.id course_id,p.revision,c.code course_code,p.audience_label,p.title,p.description,p.activities,
+                select c.id course_id,p.revision,c.code course_code,p.audience_label,p.session_duration_minutes,p.weekly_sessions,
+                  p.title,p.description,p.activities,
                   a.public_path image_url,p.alt_text,p.display_order
                 from course c join class_program p on p.course_id=c.id join media_asset a on a.id=p.media_asset_id
                 where c.id=:id and c.active and p.status='PUBLISHED' and p.visible and a.status='READY' and a.public_path is not null
+                  and p.audience_label is not distinct from c.age_guide
+                  and p.session_duration_minutes is not distinct from c.session_duration_minutes
+                  and p.weekly_sessions is not distinct from c.weekly_sessions
+                  and c.age_guide is not null and c.session_duration_minutes is not null and c.weekly_sessions is not null
                 """).param("id",ref.id()).query((rs,row)->new PublicCourse(rs.getObject("course_id",UUID.class),rs.getInt("revision"),
-                    rs.getString("course_code"),rs.getString("audience_label"),rs.getString("title"),rs.getString("description"),
-                    readActivities(rs),rs.getString("image_url"),rs.getString("alt_text"),rs.getInt("display_order")))
+                    rs.getString("course_code"),rs.getString("audience_label"),
+                    (Integer)rs.getObject("session_duration_minutes"),(Integer)rs.getObject("weekly_sessions"),
+                    rs.getString("title"),rs.getString("description"),readActivities(rs),rs.getString("image_url"),
+                    rs.getString("alt_text"),rs.getInt("display_order")))
                 .optional().ifPresent(values::add);
         return values;
     }

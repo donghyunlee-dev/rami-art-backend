@@ -31,6 +31,7 @@ public final class HomePageContentModels {
     public record PublicHero(String title, String description, String imageUrl, String altText, String ctaLabel, String href) {}
     public record PublicSection(String sectionKey, int displayOrder) {}
     public record PublicCourse(UUID courseId, int revision, String courseCode, String audienceLabel,
+            Integer sessionDurationMinutes, Integer weeklySessions,
             String title, String description, List<String> activities, String imageUrl, String altText, int displayOrder) {}
     public record PublicArtwork(UUID artworkId, int revision, String courseCode, String audienceLabel,
             String title, String medium, String description, String imageUrl, String altText, int displayOrder) {}

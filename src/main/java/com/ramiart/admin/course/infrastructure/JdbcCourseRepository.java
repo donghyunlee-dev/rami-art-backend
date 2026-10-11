@@ -37,7 +37,8 @@ public class JdbcCourseRepository implements CourseRepository {
         long total = jdbcClient.sql("select count(*) from course c " + COURSE_FILTER)
                 .param("keyword", keyword).param("active", active).query(Long.class).single();
         List<CourseSummary> content = jdbcClient.sql("""
-                        select c.id, c.code, c.name, c.description, c.age_guide, c.display_order,
+                        select c.id, c.code, c.name, c.description, c.age_guide,
+                               c.session_duration_minutes, c.weekly_sessions, c.display_order,
                                c.active, c.version, count(g.id)::int class_group_count,
                                count(g.id) filter (where g.status = 'ACTIVE')::int active_class_group_count
                         from course c
@@ -55,17 +56,21 @@ public class JdbcCourseRepository implements CourseRepository {
     @Override
     public Optional<CourseDetail> findCourse(UUID courseId) {
         Optional<CourseDetail> course = jdbcClient.sql("""
-                        select id, code, name, description, age_guide, display_order, active, version
+                        select id, code, name, description, age_guide, session_duration_minutes, weekly_sessions,
+                               display_order, active, version
                         from course where id = :id
                         """)
                 .param("id", courseId)
                 .query((rs, rowNum) -> new CourseDetail(
                         rs.getObject("id", UUID.class), rs.getString("code"), rs.getString("name"),
-                        rs.getString("description"), rs.getString("age_guide"), rs.getInt("display_order"),
+                        rs.getString("description"), rs.getString("age_guide"),
+                        (Integer) rs.getObject("session_duration_minutes"), (Integer) rs.getObject("weekly_sessions"),
+                        rs.getInt("display_order"),
                         rs.getBoolean("active"), rs.getLong("version"), List.of()))
                 .optional();
         return course.map(value -> new CourseDetail(value.id(), value.code(), value.name(), value.description(),
-                value.ageGuide(), value.displayOrder(), value.active(), value.version(), findGroups(courseId)));
+                value.ageGuide(), value.sessionDurationMinutes(), value.weeklySessions(), value.displayOrder(),
+                value.active(), value.version(), findGroups(courseId)));
     }
 
     @Override
@@ -108,11 +113,14 @@ public class JdbcCourseRepository implements CourseRepository {
     @Override
     public void insertCourse(UUID id, CourseWrite command, UUID actorId) {
         jdbcClient.sql("""
-                        insert into course (id, code, name, description, age_guide, display_order, active, created_by, updated_by)
-                        values (:id, :code, :name, :description, :age_guide, :display_order, :active, :actor_id, :actor_id)
+                        insert into course (id, code, name, description, age_guide, session_duration_minutes,
+                            weekly_sessions, display_order, active, created_by, updated_by)
+                        values (:id, :code, :name, :description, :age_guide, :duration, :weekly,
+                            :display_order, :active, :actor_id, :actor_id)
                         """)
                 .param("id", id).param("code", command.code()).param("name", command.name())
                 .param("description", command.description()).param("age_guide", command.ageGuide())
+                .param("duration", command.sessionDurationMinutes()).param("weekly", command.weeklySessions())
                 .param("display_order", command.displayOrder()).param("active", command.active())
                 .param("actor_id", actorId).update();
     }
@@ -121,12 +129,14 @@ public class JdbcCourseRepository implements CourseRepository {
     public int updateCourse(UUID id, CourseWrite command, UUID actorId) {
         return jdbcClient.sql("""
                         update course set code = :code, name = :name, description = :description,
-                            age_guide = :age_guide, display_order = :display_order, active = :active,
+                            age_guide = :age_guide, session_duration_minutes = :duration, weekly_sessions = :weekly,
+                            display_order = :display_order, active = :active,
                             version = version + 1, updated_by = :actor_id
                         where id = :id and version = :version
                         """)
                 .param("id", id).param("code", command.code()).param("name", command.name())
                 .param("description", command.description()).param("age_guide", command.ageGuide())
+                .param("duration", command.sessionDurationMinutes()).param("weekly", command.weeklySessions())
                 .param("display_order", command.displayOrder()).param("active", command.active())
                 .param("version", command.version()).param("actor_id", actorId).update();
     }
@@ -293,7 +303,9 @@ public class JdbcCourseRepository implements CourseRepository {
 
     private CourseSummary mapSummary(ResultSet rs, int rowNum) throws SQLException {
         return new CourseSummary(rs.getObject("id", UUID.class), rs.getString("code"), rs.getString("name"),
-                rs.getString("description"), rs.getString("age_guide"), rs.getInt("display_order"),
+                rs.getString("description"), rs.getString("age_guide"),
+                (Integer) rs.getObject("session_duration_minutes"), (Integer) rs.getObject("weekly_sessions"),
+                rs.getInt("display_order"),
                 rs.getBoolean("active"), rs.getLong("version"), rs.getInt("class_group_count"),
                 rs.getInt("active_class_group_count"));
     }

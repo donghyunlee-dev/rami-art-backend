@@ -14,11 +14,13 @@ public final class CourseModels {
 
     public record CourseSummary(
             UUID id, String code, String name, String description, String ageGuide,
+            Integer sessionDurationMinutes, Integer weeklySessions,
             int displayOrder, boolean active, long version, int classGroupCount, int activeClassGroupCount) {
     }
 
     public record CourseDetail(
             UUID id, String code, String name, String description, String ageGuide,
+            Integer sessionDurationMinutes, Integer weeklySessions,
             int displayOrder, boolean active, long version, List<ClassGroupView> classGroups) {
     }
 
@@ -32,6 +34,7 @@ public final class CourseModels {
 
     public record CourseWrite(
             String code, String name, String description, String ageGuide,
+            Integer sessionDurationMinutes, Integer weeklySessions,
             int displayOrder, boolean active, Long version) {
     }
 
