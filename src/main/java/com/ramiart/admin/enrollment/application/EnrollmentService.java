@@ -39,15 +39,33 @@ public class EnrollmentService {
     @Transactional(readOnly=true) public List<AssigneeOption> assignees(){return repository.findAssignees();}
     @Transactional(readOnly=true) public CaseDetail detail(UUID id){return detail(record(id,false));}
 
+    @Transactional(readOnly=true)
+    public List<ContactDuplicateCandidate> duplicateCandidates(String rawPhone){
+        String normalized=phone(rawPhone);
+        return repository.findContactDuplicates(inquiryProtector.hash("phone:"+normalized),protector.hash(normalized)).stream()
+                .map(candidate->{String name=switch(candidate.type()){
+                    case "INQUIRY"->inquiryProtector.reveal(candidate.nameValue());
+                    case "ENROLLMENT"->protector.reveal(candidate.nameValue());
+                    case "STUDENT"->new String(candidate.nameValue(),StandardCharsets.UTF_8);
+                    default->throw new IllegalStateException("Unknown enrollment duplicate candidate type");
+                };return new ContactDuplicateCandidate(candidate.type(),candidate.id(),maskName(name),candidate.phoneLast4(),candidate.status(),List.of("PHONE_HASH"));})
+                .toList();
+    }
+
     @Transactional
     public CaseDetail create(CaseCreate raw,UUID actor,UUID key,RequestMetadata meta){
         if(raw==null)fail("VALIDATION_ERROR");String scope="ENROLLMENT_CASE_CREATE",requestHash=hash(raw);Claim claim=repository.claim(scope,key,requestHash);if(!claim.claimed())return detail(claim.resourceId());
+        String channel=raw.inquiryId()==null?(raw.channel()==null?"PHONE":raw.channel()):null;
+        if(raw.inquiryId()==null&&!Set.of("PHONE","IN_PERSON").contains(channel)||raw.inquiryId()!=null&&raw.channel()!=null)fail("VALIDATION_ERROR");
         String name;String phone;UUID course=raw.desiredCourseId();
         if(raw.inquiryId()!=null){repository.findCaseByInquiry(raw.inquiryId()).ifPresent(id->{throw new EnrollmentException("ENROLLMENT_CASE_EXISTS",Map.of("caseId",id));});InquiryLead inquiry=repository.findInquiry(raw.inquiryId()).orElseThrow(()->new EnrollmentException("INQUIRY_NOT_FOUND"));name=inquiryProtector.reveal(inquiry.nameCiphertext());phone=inquiryProtector.reveal(inquiry.phoneCiphertext());if(course==null)course=inquiry.courseId();}
         else{name=name(raw.leadName());phone=phone(raw.phone());}
         if(name==null||name.length()>100)fail("VALIDATION_ERROR");phone=phone(phone);var n=protector.protect(name);var p=protector.protect(phone);UUID id=UUID.randomUUID();
-        repository.insertCase(id,raw.inquiryId(),n.ciphertext(),p.ciphertext(),p.hash(),phone.substring(phone.length()-4),course,raw.desiredClassGroupId(),actor);
-        repository.insertActivity(id,"CREATED",null,null,null,null,null,clock.instant(),actor);event(actor,meta,"ENROLLMENT_CASE_CREATED",id,Map.of("source",raw.inquiryId()==null?"MANUAL":"INQUIRY","phoneLast4",phone.substring(phone.length()-4)));
+        int inserted=repository.insertCase(id,raw.inquiryId(),n.ciphertext(),p.ciphertext(),p.hash(),phone.substring(phone.length()-4),course,raw.desiredClassGroupId(),actor);
+        if(inserted==0&&raw.inquiryId()!=null){UUID existing=repository.findCaseByInquiry(raw.inquiryId()).orElseThrow();throw new EnrollmentException("ENROLLMENT_CASE_EXISTS",Map.of("caseId",existing));}
+        repository.insertActivity(id,"CREATED",null,null,null,null,null,clock.instant(),actor);
+        Map<String,Object> auditDetails=new LinkedHashMap<>();auditDetails.put("source",raw.inquiryId()==null?"MANUAL":"INQUIRY");auditDetails.put("phoneLast4",phone.substring(phone.length()-4));if(channel!=null)auditDetails.put("channel",channel);
+        event(actor,meta,"ENROLLMENT_CASE_CREATED",id,auditDetails);
         repository.complete(scope,key,id,201);return detail(id);
     }
     @Transactional

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.*;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,7 +31,22 @@ public final class EnrollmentController {
     @GetMapping("/assignees") ResponseEntity<ApiEnvelope<List<AssigneeOption>>> assignees(HttpServletRequest request){return ok(service.assignees(),request);}
     @GetMapping("/{id}") ResponseEntity<ApiEnvelope<CaseDetail>> detail(@PathVariable UUID id,HttpServletRequest request){return ok(service.detail(id),request);}
     @PostMapping ResponseEntity<ApiEnvelope<CaseDetail>> create(@RequestHeader("Idempotency-Key")UUID key,
-            @RequestBody CaseCreate body,Authentication auth,HttpServletRequest request){return created(service.create(body,actor(auth),key,meta(request)),request);}
+            @RequestBody CaseCreate body,Authentication auth,HttpServletRequest request){
+        if(!has(auth,"ENROLLMENT_READ"))throw new AccessDeniedException("ENROLLMENT_READ required");
+        if(body!=null&&body.inquiryId()!=null&&!has(auth,"INQUIRY_READ"))throw new AccessDeniedException("INQUIRY_READ required");
+        return created(service.create(body,actor(auth),key,meta(request)),request);}
+    @PostMapping("/duplicate-candidates") ResponseEntity<ApiEnvelope<List<ContactDuplicateCandidate>>>
+            duplicateCandidates(@RequestBody DuplicateCandidatesRequest body,Authentication auth,HttpServletRequest request){
+        boolean inquiryRead=has(auth,"INQUIRY_READ"),enrollmentRead=has(auth,"ENROLLMENT_READ"),studentRead=has(auth,"STUDENT_READ");
+        List<ContactDuplicateCandidate> candidates=service.duplicateCandidates(body==null?null:body.phone()).stream()
+                .map(candidate->new ContactDuplicateCandidate(candidate.type(),switch(candidate.type()){
+                    case "INQUIRY"->inquiryRead?candidate.id():null;
+                    case "ENROLLMENT"->enrollmentRead?candidate.id():null;
+                    case "STUDENT"->studentRead?candidate.id():null;
+                    default->null;
+                },candidate.maskedName(),candidate.phoneLast4(),candidate.status(),candidate.matchedBy())).toList();
+        return ok(candidates,request);
+    }
     @PostMapping("/{id}/activities") ResponseEntity<ApiEnvelope<CaseDetail>> contact(@PathVariable UUID id,
             @RequestHeader("Idempotency-Key")UUID key,@RequestBody ActivityWrite body,Authentication auth,HttpServletRequest request){return created(service.contact(id,body,actor(auth),key,meta(request)),request);}
     @PostMapping("/{id}/trial") ResponseEntity<ApiEnvelope<CaseDetail>> trial(@PathVariable UUID id,
@@ -53,6 +69,12 @@ public final class EnrollmentController {
         case "ENROLLMENT_CONSENT_REQUIRED","ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED","ENROLLMENT_INVALID_TRANSITION","ENROLLMENT_PREVIEW_REQUIRED","ENROLLMENT_SLOT_INVALID","ENROLLMENT_ASSIGNEE_INVALID"->HttpStatus.UNPROCESSABLE_ENTITY;
         default->HttpStatus.BAD_REQUEST;};Map<String,Object> value=new LinkedHashMap<>();value.put("code",exception.code());value.put("message",message(exception.code()));if(!exception.details().isEmpty())value.put("details",exception.details());return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("success",false,"error",value,"requestId",RequestIdFilter.get(request)));}
 
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ApiEnvelope<Void>> forbidden(AccessDeniedException exception,HttpServletRequest request){
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).cacheControl(CacheControl.noStore())
+                .body(ApiEnvelope.failure("ADMIN_ACCESS_DENIED","상담 또는 문의 조회 권한이 필요합니다.",List.of(),RequestIdFilter.get(request)));
+    }
+
     @ExceptionHandler(DataAccessException.class)
     ResponseEntity<ApiEnvelope<Void>> persistence(DataAccessException exception,HttpServletRequest request){
         String requestId=RequestIdFilter.get(request);
@@ -67,6 +89,7 @@ public final class EnrollmentController {
 
     private static String message(String code){return switch(code){case "ENROLLMENT_CASE_EXISTS"->"이미 연결된 등록 상담이 있습니다.";case "ENROLLMENT_VERSION_CONFLICT"->"다른 관리자가 먼저 변경했습니다.";case "ENROLLMENT_CAPACITY_FULL"->"반 정원이 마감되었습니다.";case "ENROLLMENT_CONSENT_REQUIRED"->"필수 동의가 필요합니다.";case "ENROLLMENT_DUPLICATE_CONFIRMATION_REQUIRED"->"중복 후보 확인이 필요합니다.";case "ENROLLMENT_INVALID_TRANSITION"->"현재 단계에서 허용되지 않는 변경입니다.";case "ENROLLMENT_PREVIEW_REQUIRED"->"등록 영향을 다시 확인해 주세요.";case "ENROLLMENT_ASSIGNEE_INVALID"->"활성 상태의 담당자를 선택해 주세요.";default->"입력값을 확인해 주세요.";};}
     private static UUID actor(Authentication value){return UUID.fromString(value.getName());}
+    private static boolean has(Authentication auth,String permission){return auth!=null&&auth.getAuthorities().stream().anyMatch(authority->permission.equals(authority.getAuthority()));}
     private static RequestMetadata meta(HttpServletRequest request){String ua=request.getHeader(HttpHeaders.USER_AGENT);if(ua!=null)ua=ua.replaceAll("[\\p{Cntrl}]","");if(ua!=null&&ua.length()>512)ua=ua.substring(0,512);return new RequestMetadata(RequestIdFilter.get(request),request.getRemoteAddr(),ua);}
     private static <T>ResponseEntity<ApiEnvelope<T>> ok(T data,HttpServletRequest request){return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiEnvelope.success(data,RequestIdFilter.get(request)));}
     private static <T>ResponseEntity<ApiEnvelope<T>> created(T data,HttpServletRequest request){return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(ApiEnvelope.success(data,RequestIdFilter.get(request)));}

@@ -40,9 +40,10 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             .param("id",id).query(this::mapActivity).list();}
     public int waitlistPosition(UUID id,UUID group,Instant at){if(group==null||at==null)return 0;return jdbc.sql("select count(*)+1 from enrollment_case where desired_class_group_id=:group and status='WAITLISTED' and (waitlisted_at,id)<(:at,:id)")
             .param("group",group).param("at",odt(at)).param("id",id).query(Integer.class).single();}
-    public void insertCase(UUID id,UUID inquiry,byte[] name,byte[] phone,String hash,String last4,UUID course,UUID group,UUID actor){jdbc.sql("""
+    public int insertCase(UUID id,UUID inquiry,byte[] name,byte[] phone,String hash,String last4,UUID course,UUID group,UUID actor){return jdbc.sql("""
             insert into enrollment_case(id,inquiry_id,lead_name_ciphertext,phone_ciphertext,phone_hash,phone_last4,desired_course_id,desired_class_group_id,assignee_admin_user_id,created_by,updated_by)
             values(:id,:inquiry,:name,:phone,:hash,:last4,:course,:group,:assignee,:actor,:actor)
+            on conflict (inquiry_id) do nothing
             """).param("id",id).param("inquiry",inquiry).param("name",name).param("phone",phone).param("hash",hash).param("last4",last4)
             .param("course",course).param("group",group).param("assignee",actor).param("actor",actor).update();}
     public List<AssigneeOption> findAssignees(){return jdbc.sql("""
@@ -97,6 +98,19 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             """).param("name",name).param("birthday",birthday).param("hashes",hashes.toArray(String[]::new))
             .query((r,n)->new DuplicateCandidate(r.getObject("id",UUID.class),r.getString("student_name"),r.getString("status"),
                     Arrays.asList((String[])r.getArray("matched_by").getArray()))).list();}
+    public List<ContactCandidateRecord> findContactDuplicates(String inquiryPhoneHash,String enrollmentPhoneHash){return jdbc.sql("""
+            select type,id,name_value,phone_last4,status from (
+              select 'INQUIRY'::text type,i.id,i.name_ciphertext name_value,i.phone_last4,i.status, i.received_at matched_at
+                from inquiry i where i.phone_hash=:inquiryHash
+              union all
+              select 'ENROLLMENT'::text type,e.id,e.lead_name_ciphertext name_value,e.phone_last4,e.status,e.updated_at matched_at
+                from enrollment_case e where e.phone_hash=:enrollmentHash
+              union all
+              select 'STUDENT'::text type,s.id,convert_to(s.student_name,'UTF8') name_value,g.phone_last4,s.status,s.created_at matched_at
+                from student s join guardian_contact g on g.student_id=s.id where g.phone_hash=:enrollmentHash
+            ) candidates order by matched_at desc,id limit 30
+            """).param("inquiryHash",inquiryPhoneHash).param("enrollmentHash",enrollmentPhoneHash)
+            .query((r,n)->new ContactCandidateRecord(r.getString("type"),r.getObject("id",UUID.class),r.getBytes("name_value"),r.getString("phone_last4"),r.getString("status"))).list();}
     public void insertStudent(UUID id,StudentWrite s,String search,UUID actor){jdbc.sql("insert into student(id,student_name,student_name_search,school_name,birthday,status,joined_at,created_by,updated_by) values(:id,:name,:search,:school,:birthday,'ACTIVE',:joined,:actor,:actor)")
             .param("id",id).param("name",s.name()).param("search",search).param("school",s.schoolName()).param("birthday",s.birthday()).param("joined",s.joinedAt()).param("actor",actor).update();}
     public void insertGuardian(UUID student,StoredGuardian g){jdbc.sql("""

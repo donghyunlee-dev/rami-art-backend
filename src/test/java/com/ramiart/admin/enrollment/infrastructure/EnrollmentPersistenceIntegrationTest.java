@@ -3,6 +3,7 @@ package com.ramiart.admin.enrollment.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -29,7 +30,9 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.*;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -41,6 +44,8 @@ class EnrollmentPersistenceIntegrationTest {
     private static final EmbeddedPostgres POSTGRES=startPostgres();
     @Autowired DataSource dataSource;
     @Autowired EnrollmentService service;
+    @Autowired AesGcmInquiryDataProtector inquiryProtector;
+    @Autowired AesGcmStudentDataProtector studentProtector;
     private JdbcTemplate jdbc;
 
     @Configuration(proxyBeanMethods=false)
@@ -159,6 +164,62 @@ class EnrollmentPersistenceIntegrationTest {
                 .containsExactlyInAnyOrder("NAME_BIRTHDAY","GUARDIAN_PHONE");
     }
 
+    @Test void contactDuplicateCandidatesMatchInquiryCaseAndStudentHashesAndMaskNames()throws Exception{
+        UUID actor=actor(),course=UUID.randomUUID(),group=UUID.randomUUID(),slot=UUID.randomUUID(),policy=UUID.randomUUID();fixture(actor,course,group,slot,policy,3);
+        String phone="+821012345678";
+        var existingCase=service.create(new CaseCreate(null,"김가람",phone,course,group),actor,UUID.randomUUID(),meta("candidate-case"));
+
+        UUID inquiryId=UUID.randomUUID();
+        jdbc.update("""
+                insert into inquiry(id,name_ciphertext,name_hash,phone_ciphertext,phone_hash,phone_last4,message_ciphertext,
+                  status,consent_policy_version,retention_expires_at)
+                values(?,?,?,?,?,?,?,'RECEIVED','v1',statement_timestamp()+interval '3 years')
+                """,inquiryId,inquiryProtector.protect("박문의"),inquiryProtector.hash("name:박문의"),
+                inquiryProtector.protect(phone),inquiryProtector.hash("phone:"+phone),"5678",
+                inquiryProtector.protect("수업을 문의합니다."));
+
+        UUID studentId=UUID.randomUUID(),guardianId=UUID.randomUUID();
+        jdbc.update("insert into student(id,student_name,student_name_search,status,joined_at,created_by,updated_by) values(?,?,?,'ACTIVE',current_date,?,?)",
+                studentId,"이원생","이원생",actor,actor);
+        jdbc.update("""
+                insert into guardian_contact(id,student_id,name,relationship,phone_ciphertext,phone_hash,phone_last4,
+                  preferred_channel,primary_contact,display_order)
+                values(?,?,?,'MOTHER',?,?,?,'SMS',true,0)
+                """,guardianId,studentId,"이보호자",studentProtector.protect(phone).ciphertext(),studentProtector.hash(phone),"5678");
+
+        var candidates=service.duplicateCandidates("010-1234-5678");
+
+        assertThat(candidates).extracting(ContactDuplicateCandidate::type)
+                .containsExactlyInAnyOrder("INQUIRY","ENROLLMENT","STUDENT");
+        assertThat(candidates).anySatisfy(candidate->{assertThat(candidate.id()).isEqualTo(inquiryId);assertThat(candidate.maskedName()).isEqualTo("박**");});
+        assertThat(candidates).anySatisfy(candidate->{assertThat(candidate.id()).isEqualTo(existingCase.id());assertThat(candidate.maskedName()).isEqualTo("김**");});
+        assertThat(candidates).anySatisfy(candidate->{assertThat(candidate.id()).isEqualTo(studentId);assertThat(candidate.maskedName()).isEqualTo("이**");});
+        assertThat(candidates).allSatisfy(candidate->{assertThat(candidate.phoneLast4()).isEqualTo("5678");assertThat(candidate.matchedBy()).containsExactly("PHONE_HASH");});
+
+        var mvc=MockMvcBuilders.standaloneSetup(new EnrollmentController(service)).addFilters(new RequestIdFilter()).build();
+        String candidateResponse=mvc.perform(post("/api/admin/enrollments/duplicate-candidates")
+                        .principal(authentication(actor,"ENROLLMENT_WRITE","INQUIRY_READ","ENROLLMENT_READ","STUDENT_READ"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"phone\":\"010-1234-5678\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(3))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(candidateResponse).doesNotContain(phone,"김가람","박문의","이원생");
+        String body="{\"inquiryId\":\""+inquiryId+"\"}";
+        var linkedResponse=mvc.perform(post("/api/admin/enrollments").header("Idempotency-Key",UUID.randomUUID().toString())
+                        .header("X-Request-Id","req_inquiry_create").principal(authentication(actor,"ENROLLMENT_READ","ENROLLMENT_WRITE","INQUIRY_READ"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.requestId").value("req_inquiry_create"))
+                .andExpect(jsonPath("$.data.inquiryId").value(inquiryId.toString()))
+                .andExpect(jsonPath("$.data.nextAction").value("CONTACT")).andReturn();
+        UUID linkedId=UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(linkedResponse.getResponse().getContentAsString()).path("data").path("id").asText());
+        assertThat(jdbc.queryForObject("select count(*) from enrollment_case where inquiry_id=?",Integer.class,inquiryId)).isOne();
+        mvc.perform(post("/api/admin/enrollments").header("Idempotency-Key",UUID.randomUUID().toString())
+                        .principal(authentication(actor,"ENROLLMENT_READ","ENROLLMENT_WRITE","INQUIRY_READ"))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("ENROLLMENT_CASE_EXISTS"))
+                .andExpect(jsonPath("$.error.details.caseId").value(linkedId.toString()));
+    }
+
     @Test void defaultListIncludesNewlyCreatedCaseAndReturnsEmptyListWhenNoneExist() throws Exception {
         var mvc=MockMvcBuilders.standaloneSetup(new EnrollmentController(service))
                 .addFilters(new RequestIdFilter()).build();
@@ -203,6 +264,10 @@ class EnrollmentPersistenceIntegrationTest {
     }
     private static EnrollWrite enroll(long version,UUID group,UUID slot,UUID policy,String phone,String override,String token){return new EnrollWrite(version,new StudentWrite("신규 원생",LocalDate.now().minusYears(8),"별빛학교",LocalDate.now()),List.of(new GuardianWrite("김보호","MOTHER",null,phone,null,"SMS",true,0)),group,List.of(slot),LocalDate.now(),policy==null?List.of():List.of(policy),override,token);}
     private UUID actor(){return jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);}
+    private static org.springframework.security.core.Authentication authentication(UUID actor,String...permissions){
+        return UsernamePasswordAuthenticationToken.authenticated(actor.toString(),"n/a",Arrays.stream(permissions)
+                .<org.springframework.security.core.GrantedAuthority>map(permission->()->permission).toList());
+    }
     private static EnrollmentService.RequestMetadata meta(String id){return new EnrollmentService.RequestMetadata(id,"127.0.0.1","integration-test");}
     private static void role(Statement s,String role)throws SQLException{try(var r=s.executeQuery("select exists(select 1 from pg_roles where rolname='"+role+"')")){r.next();if(!r.getBoolean(1))s.execute("create role "+role);}}
     private static Path root(){Path p=Path.of("").toAbsolutePath().normalize();if(Files.isDirectory(p.resolve("supabase")))return p;if(Files.isDirectory(p.getParent().resolve("supabase")))return p.getParent();throw new IllegalStateException("supabase directory not found");}

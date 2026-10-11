@@ -21,6 +21,7 @@ public interface EnrollmentRepository {
     record CaseRecordsPage(List<CaseRecord> items,long total) {}
     record StoredGuardian(UUID id,GuardianWrite value,byte[] phoneCiphertext,String phoneHash,String last4,
             byte[] emailCiphertext,String emailHash,String emailDomain) {}
+    record ContactCandidateRecord(String type,UUID id,byte[] nameValue,String phoneLast4,String status) {}
 
     Optional<InquiryLead> findInquiry(UUID id);
     Optional<UUID> findCaseByInquiry(UUID id);
@@ -31,7 +32,7 @@ public interface EnrollmentRepository {
     int updateAssignee(UUID id,long version,UUID assigneeId,UUID actor);
     List<ActivityRecord> findActivities(UUID caseId);
     int waitlistPosition(UUID caseId,UUID groupId,Instant at);
-    void insertCase(UUID id,UUID inquiryId,byte[] name,byte[] phone,String phoneHash,String last4,
+    int insertCase(UUID id,UUID inquiryId,byte[] name,byte[] phone,String phoneHash,String last4,
             UUID courseId,UUID groupId,UUID actor);
     int updateState(UUID id,long version,String expected,String next,UUID courseId,UUID groupId,
             Instant trialAt,Instant waitlistedAt,String lostReason,UUID studentId,UUID actor);
@@ -41,6 +42,7 @@ public interface EnrollmentRepository {
     List<UUID> activeSlotIds(UUID groupId,List<UUID> requested);
     List<UUID> requiredConsentIds();
     List<DuplicateCandidate> duplicateCandidates(String normalizedName,LocalDate birthday,List<String> phoneHashes);
+    List<ContactCandidateRecord> findContactDuplicates(String inquiryPhoneHash,String enrollmentPhoneHash);
     void insertStudent(UUID id,StudentWrite student,String nameSearch,UUID actor);
     void insertGuardian(UUID studentId,StoredGuardian guardian);
     void insertInitialStatus(UUID studentId,LocalDate joinedAt,UUID actor);

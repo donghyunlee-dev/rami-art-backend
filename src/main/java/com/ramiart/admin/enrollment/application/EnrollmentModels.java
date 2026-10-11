@@ -9,7 +9,14 @@ public final class EnrollmentModels {
     private EnrollmentModels() {}
 
     public record CaseCreate(UUID inquiryId, String leadName, String phone, UUID desiredCourseId,
-            UUID desiredClassGroupId) {}
+            UUID desiredClassGroupId, String channel) {
+        public CaseCreate(UUID inquiryId, String leadName, String phone, UUID desiredCourseId, UUID desiredClassGroupId) {
+            this(inquiryId, leadName, phone, desiredCourseId, desiredClassGroupId, null);
+        }
+    }
+    public record DuplicateCandidatesRequest(String phone) {}
+    public record ContactDuplicateCandidate(String type, UUID id, String maskedName, String phoneLast4,
+            String status, List<String> matchedBy) {}
     public record CaseSummary(UUID id, String leadName, String phoneLast4, String status,
             UUID desiredCourseId, String desiredCourseName, UUID desiredClassGroupId,
             String desiredClassGroupName, String nextAction, UUID assigneeId, String assigneeName,
