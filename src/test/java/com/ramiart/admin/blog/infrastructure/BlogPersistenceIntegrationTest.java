@@ -101,23 +101,34 @@ class BlogPersistenceIntegrationTest {
 
     @Test void adminListSupportsDefaultQueryAndTitleSearchForPublishedPostsWithDrafts() {
         UUID actor=jdbc.queryForObject("select id from admin_user order by created_at limit 1",UUID.class);
-        var created=service.create(new Write("여름 전시 이야기","요약","CLASS_STORY","<p>본문</p>",null,null,false),
+        String uniqueTitle="nullable-"+UUID.randomUUID().toString().substring(0,8);
+        assertThat(service.list(uniqueTitle,List.of(),List.of(),"UPDATED_DESC",0,20).totalElements()).isZero();
+        var created=service.create(new Write(uniqueTitle,"요약","CLASS_STORY","<p>본문</p>",null,null,false),
                 actor,UUID.randomUUID(),metadata());
         service.publish(created.postId(),new Publish(created.draftId(),created.version()),actor,UUID.randomUUID(),metadata());
         var draft=service.createDraft(created.postId(),actor,UUID.randomUUID(),metadata());
 
         var defaultPage=service.list(null,List.of(),List.of(),"UPDATED_DESC",0,20);
         assertThat(defaultPage.sort()).isEqualTo("UPDATED_DESC");
+        assertThat(defaultPage.totalElements()).isGreaterThanOrEqualTo(1);
         assertThat(defaultPage.items()).anySatisfy(item -> {
             assertThat(item.postId()).isEqualTo(created.postId());
-            assertThat(item.displayTitle()).isEqualTo("여름 전시 이야기");
+            assertThat(item.displayTitle()).isEqualTo(uniqueTitle);
             assertThat(item.published()).isNotNull();
             assertThat(item.draft()).isNotNull();
             assertThat(item.draft().revision()).isEqualTo(draft.revision());
         });
 
-        var searchPage=service.list("전시",List.of(),List.of(),"UPDATED_DESC",0,20);
+        var searchPage=service.list(uniqueTitle,List.of(),List.of(),"UPDATED_DESC",0,20);
+        assertThat(searchPage.totalElements()).isEqualTo(1);
         assertThat(searchPage.items()).extracting(item -> item.postId()).contains(created.postId());
+        var categoryPage=service.list(null,List.of("CLASS_STORY"),List.of(),"TITLE_ASC",0,20);
+        assertThat(categoryPage.totalElements()).isEqualTo(categoryPage.items().size());
+        assertThat(categoryPage.items()).extracting(item -> item.postId()).contains(created.postId());
+        var draftPage=service.list(null,List.of(),List.of("HAS_DRAFT"),"UPDATED_DESC",0,20);
+        assertThat(draftPage.totalElements()).isEqualTo(draftPage.items().size());
+        assertThat(draftPage.items()).extracting(item -> item.postId()).contains(created.postId());
+        assertThat(service.list(null,List.of(),List.of(),"TITLE_ASC",0,10).totalElements()).isEqualTo(defaultPage.totalElements());
     }
 
     private static BlogService.RequestMetadata metadata() { return new BlogService.RequestMetadata("req_blog_test","127.0.0.1","integration"); }

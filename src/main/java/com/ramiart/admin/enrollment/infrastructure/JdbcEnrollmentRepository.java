@@ -5,6 +5,7 @@ import com.ramiart.admin.enrollment.application.EnrollmentModels.*;
 import com.ramiart.admin.enrollment.application.EnrollmentRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.*;
 import java.util.*;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -129,7 +130,7 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
             from enrollment_case e left join course c on c.id=e.desired_course_id left join class_group g on g.id=e.desired_class_group_id
             join admin_user assignee on assignee.id=e.assignee_admin_user_id
             """;}
-    private void bind(JdbcClient.StatementSpec q,List<String>s,UUID c,Instant f,Instant t){q.param("statuses",s.toArray(String[]::new)).param("from",odt(f)).param("to",odt(t));if(c!=null)q.param("course",c);}
+    private void bind(JdbcClient.StatementSpec q,List<String>s,UUID c,Instant f,Instant t){q.param("statuses",s.toArray(String[]::new)).param("from",odt(f)).param("to",odt(t));if(c!=null)q.param("course",c,Types.OTHER);}
     private CaseRecord mapCase(ResultSet r,int n)throws SQLException{return new CaseRecord(r.getObject("id",UUID.class),r.getObject("inquiry_id",UUID.class),r.getBytes("lead_name_ciphertext"),r.getBytes("phone_ciphertext"),r.getString("phone_hash"),r.getString("phone_last4"),r.getString("status"),r.getObject("desired_course_id",UUID.class),r.getString("course_name"),r.getObject("desired_class_group_id",UUID.class),r.getString("group_name"),instant(r,"trial_starts_at"),instant(r,"waitlisted_at"),r.getObject("student_id",UUID.class),r.getString("lost_reason"),r.getLong("version"),instant(r,"updated_at"),r.getInt("capacity"),r.getInt("occupancy"),r.getObject("assignee_admin_user_id",UUID.class),r.getString("assignee_name"));}
     private ActivityRecord mapActivity(ResultSet r,int n)throws SQLException{return new ActivityRecord(r.getObject("id",UUID.class),r.getLong("sequence"),r.getString("type"),r.getString("from_status"),r.getString("to_status"),r.getString("channel"),r.getString("outcome"),r.getBytes("note_ciphertext"),instant(r,"occurred_at"),r.getObject("created_by",UUID.class));}
     private static Instant instant(ResultSet r,String c)throws SQLException{OffsetDateTime v=r.getObject(c,OffsetDateTime.class);return v==null?null:v.toInstant();}

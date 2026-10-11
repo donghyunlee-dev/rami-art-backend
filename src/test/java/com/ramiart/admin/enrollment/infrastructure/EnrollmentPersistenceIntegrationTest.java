@@ -166,7 +166,10 @@ class EnrollmentPersistenceIntegrationTest {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
                 .contains("\"totalElements\":0");
         UUID actor=actor();
-        CaseDetail created=service.create(new CaseCreate(null,"목록 상담","010-9876-5432",null,null),
+        UUID courseId=UUID.randomUUID();
+        jdbc.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,'목록 조회 과정',1,true,?,?)",
+                courseId,"LIST_"+courseId.toString().substring(0,8).toUpperCase(Locale.ROOT),actor,actor);
+        CaseDetail created=service.create(new CaseCreate(null,"목록 상담","010-9876-5432",courseId,null),
                 actor,UUID.randomUUID(),meta("list-create"));
 
         mvc.perform(get("/api/admin/enrollments?page=0&size=20").header("X-Request-Id","req_enrollment_list_data"))
@@ -181,6 +184,13 @@ class EnrollmentPersistenceIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1));
         mvc.perform(get("/api/admin/enrollments?statuses=CONTACTED&page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+        mvc.perform(get("/api/admin/enrollments?courseId="+courseId+"&page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(created.id().toString()));
+        mvc.perform(get("/api/admin/enrollments?courseId="+UUID.randomUUID()+"&page=0&size=20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(0));
     }

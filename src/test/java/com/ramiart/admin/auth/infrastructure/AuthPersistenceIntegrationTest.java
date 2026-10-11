@@ -1161,6 +1161,30 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void nullableEnrollmentAndBlogListParametersWorkThroughAuthorizedApis() throws Exception {
+        createRoleUser("OWNER", "nullable-list-owner@rami.local");
+        createRoleUser("FINANCE", "nullable-list-finance@rami.local");
+        String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "nullable-list-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_nullable_list_owner")).rawToken();
+        String financeCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "nullable-list-finance@rami.local", TEMPORARY_PASSWORD, null, metadata("req_nullable_list_finance")).rawToken();
+
+        HttpResponse<String> enrollments = http("GET", "/api/admin/enrollments?page=0&size=20", ownerCookie, null, null);
+        HttpResponse<String> blogPosts = http("GET", "/api/admin/blog-posts?page=0&size=20", ownerCookie, null, null);
+        HttpResponse<String> deniedEnrollment = http("GET", "/api/admin/enrollments?page=0&size=20", financeCookie, null, null);
+        HttpResponse<String> deniedBlog = http("GET", "/api/admin/blog-posts?page=0&size=20", financeCookie, null, null);
+
+        assertThat(enrollments.statusCode()).as(enrollments.body()).isEqualTo(200);
+        assertThat(enrollments.headers().firstValue("cache-control").orElse("")).contains("no-store");
+        assertThat(enrollments.body()).contains("totalElements", "requestId");
+        assertThat(blogPosts.statusCode()).as(blogPosts.body()).isEqualTo(200);
+        assertThat(blogPosts.headers().firstValue("cache-control").orElse("")).contains("no-store");
+        assertThat(blogPosts.body()).contains("totalElements", "requestId");
+        assertThat(deniedEnrollment.statusCode()).isEqualTo(403);
+        assertThat(deniedBlog.statusCode()).isEqualTo(403);
+    }
+
+    @Test
     void dataTransferRejectsAnActiveFileHashDuplicateBeforeStorageUpload() throws Exception {
         createRoleUser("OPERATOR", "data-transfer-duplicate@rami.local");
         String cookie = "__Host-rami_admin_session=" + authSessionService.login(

@@ -6,6 +6,7 @@ import com.ramiart.admin.blog.application.BlogModels.Write;
 import com.ramiart.admin.blog.application.BlogRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -52,7 +53,7 @@ public class JdbcBlogRepository implements BlogRepository {
                      or ('HAS_DRAFT'=any(cast(:states as text[])) and exists(select 1 from blog_post x where x.post_id=b.post_id and x.status='DRAFT')))
                 """;
         return jdbc.sql(sql + " order by " + order + " limit :size offset :offset")
-                .param("keyword", keyword).param("categories", categories.toArray(String[]::new))
+                .param("keyword", keyword, Types.VARCHAR).param("categories", categories.toArray(String[]::new))
                 .param("states", states.toArray(String[]::new)).param("size", size).param("offset", page * size)
                 .query(this::map).list();
     }
@@ -69,7 +70,7 @@ public class JdbcBlogRepository implements BlogRepository {
                      or ('PUBLISHED_VISIBLE'=any(cast(:states as text[])) and p.visible)
                      or ('PUBLISHED_HIDDEN'=any(cast(:states as text[])) and p.id is not null and not p.visible)
                      or ('HAS_DRAFT'=any(cast(:states as text[])) and d.id is not null))
-                """).param("keyword", keyword).param("categories", categories.toArray(String[]::new))
+                """).param("keyword", keyword, Types.VARCHAR).param("categories", categories.toArray(String[]::new))
                 .param("states", states.toArray(String[]::new)).query(Long.class).single();
     }
     @Override public int nextRevision(UUID postId) {
@@ -80,13 +81,13 @@ public class JdbcBlogRepository implements BlogRepository {
         return jdbc.sql(SELECT + " where b.status='PUBLISHED' and b.visible=true "
                 + "and (cast(:category as text) is null or b.category=cast(:category as text)) and (cast(:keyword as text) is null or b.title ilike '%'||cast(:keyword as text)||'%') "
                 + "order by b.published_at desc,b.post_id desc limit :size offset :offset")
-                .param("category", category).param("keyword", keyword).param("size", size)
+                .param("category", category, Types.VARCHAR).param("keyword", keyword, Types.VARCHAR).param("size", size)
                 .param("offset", (page - 1) * size).query(this::map).list();
     }
     @Override public long countPublic(String category, String keyword) {
         return jdbc.sql("select count(*) from blog_post where status='PUBLISHED' and visible=true "
                 + "and (cast(:category as text) is null or category=cast(:category as text)) and (cast(:keyword as text) is null or title ilike '%'||cast(:keyword as text)||'%')")
-                .param("category", category).param("keyword", keyword).query(Long.class).single();
+                .param("category", category, Types.VARCHAR).param("keyword", keyword, Types.VARCHAR).query(Long.class).single();
     }
     @Override public Revision insertDraft(UUID postId, UUID id, int revision, UUID basedOn, Write b, UUID actor) {
         jdbc.sql("""
