@@ -36,9 +36,11 @@ public final class EnrollmentModels {
             UUID classGroupId, List<UUID> scheduleSlotIds, LocalDate effectiveFrom, List<UUID> consentIds,
             String duplicateOverrideReason, String previewToken) {}
     public record DuplicateCandidate(UUID id, String studentName, String status, List<String> matchedBy) {}
+    public record SourceInquiry(UUID inquiryId, UUID interestedCourseId, String interestedCourseName,
+            UUID privacyPolicyRevisionId, String consentPolicyVersion, Instant consentedAt) {}
     public record EnrollmentPreview(String previewToken, int capacity, int occupancy, int remainingSeats,
             List<UUID> requiredConsentIds, List<UUID> missingConsentIds,
-            List<DuplicateCandidate> duplicateCandidates, boolean canEnroll) {}
+            List<DuplicateCandidate> duplicateCandidates, boolean canEnroll, SourceInquiry sourceInquiry) {}
     public record EnrollmentResult(CaseDetail enrollmentCase, UUID studentId, List<UUID> guardianIds,
             List<UUID> scheduleAssignmentIds) {}
 }

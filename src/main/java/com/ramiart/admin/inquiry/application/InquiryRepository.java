@@ -11,7 +11,7 @@ public interface InquiryRepository {
     record CourseRecord(UUID id, String name, boolean active) {}
     record InquiryRecord(UUID id, byte[] nameCiphertext, byte[] phoneCiphertext, String phoneLast4,
             byte[] messageCiphertext, CourseRecord course, String status, String consentPolicyVersion,
-            Instant consentedAt, Instant receivedAt, Instant readAt, UUID readById, String readByName,
+            UUID privacyPolicyRevisionId, Instant consentedAt, Instant receivedAt, Instant readAt, UUID readById, String readByName,
             String notificationStatus, Instant notificationAttemptedAt, long version, Instant lastActivityAt) {}
     record ActivityRecord(UUID id, String fromStatus, String toStatus, byte[] noteCiphertext,
             UUID createdById, String createdByName, Instant createdAt) {}
@@ -25,7 +25,8 @@ public interface InquiryRepository {
     Claim claim(String scope, UUID key, String requestHash);
     void complete(String scope, UUID key, UUID resourceId, int status);
     void insert(UUID id, byte[] name, String nameHash, byte[] phone, String phoneHash, String phoneLast4,
-            UUID courseId, String courseNameSnapshot, byte[] message, String policyVersion, Instant now);
+            UUID courseId, String courseNameSnapshot, UUID privacyPolicyRevisionId,
+            byte[] message, String policyVersion, Instant now);
     PageRecords findPage(InquiryQuery query, String keywordHash, Instant staleBefore);
     Optional<InquiryRecord> find(UUID id);
     List<ActivityRecord> findActivities(UUID id);

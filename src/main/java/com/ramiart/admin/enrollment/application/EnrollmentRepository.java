@@ -8,7 +8,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface EnrollmentRepository {
-    record InquiryLead(UUID id, byte[] nameCiphertext, byte[] phoneCiphertext, UUID courseId) {}
+    record InquiryLead(UUID id, byte[] nameCiphertext, byte[] phoneCiphertext, UUID courseId, String courseName,
+            UUID privacyPolicyRevisionId, String consentPolicyVersion, Instant consentedAt) {}
     record CaseRecord(UUID id, UUID inquiryId, byte[] nameCiphertext, byte[] phoneCiphertext, String phoneHash,
             String phoneLast4, String status, UUID courseId, String courseName, UUID groupId, String groupName,
             Instant trialAt, Instant waitlistedAt, UUID studentId, String lostReason, long version,

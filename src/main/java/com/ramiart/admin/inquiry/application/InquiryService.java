@@ -4,6 +4,9 @@ import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
 import com.ramiart.admin.inquiry.application.InquiryModels.*;
 import com.ramiart.admin.inquiry.application.InquiryRepository.*;
+import com.ramiart.admin.privacy.application.PublicPrivacyPolicyModels.Policy;
+import com.ramiart.admin.privacy.application.PublicPrivacyPolicyException;
+import com.ramiart.admin.privacy.application.PublicPrivacyPolicyService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -30,21 +33,27 @@ public class InquiryService {
     private final InquiryRateLimiter rateLimiter;
     private final AuditRecorder audit;
     private final Clock clock;
-    private final String currentPolicyVersion;
+    private final PublicPrivacyPolicyService privacyPolicyService;
     private final ZoneId studioZone;
 
     public InquiryService(InquiryRepository repository, InquiryDataProtector protector, InquiryRateLimiter rateLimiter,
-            AuditRecorder audit, Clock clock,
-            @Value("${admin.inquiry.consent-policy-version:${ADMIN_INQUIRY_CONSENT_POLICY_VERSION:privacy-2026-07}}") String policy,
+            AuditRecorder audit, Clock clock, PublicPrivacyPolicyService privacyPolicyService,
             @Value("${admin.inquiry.studio-zone:${ADMIN_STUDIO_ZONE:Asia/Seoul}}") String zone) {
         this.repository=repository; this.protector=protector; this.rateLimiter=rateLimiter; this.audit=audit;
-        this.clock=clock; this.currentPolicyVersion=policy; this.studioZone=ZoneId.of(zone);
+        this.clock=clock; this.privacyPolicyService=privacyPolicyService; this.studioZone=ZoneId.of(zone);
     }
 
     @Transactional
     public Accepted submit(PublicSubmission raw, UUID key, RequestMetadata meta) {
         PublicSubmission command=normalize(raw);
         validateSubmission(command);
+        Policy acceptedPolicy;
+        try {
+            acceptedPolicy = privacyPolicyService.requireCurrentForInquiry(
+                    command.consentPolicyVersion(), command.privacyPolicyRevisionId());
+        } catch (PublicPrivacyPolicyException exception) {
+            throw new InquiryException("CONSENT_POLICY_VERSION_INVALID");
+        }
         CourseRecord selectedCourse = command.interestedCourseId() == null ? null
                 : repository.findPublicCourseForSubmission(command.interestedCourseId())
                         .orElseThrow(() -> new InquiryException("INQUIRY_INVALID"));
@@ -57,6 +66,7 @@ public class InquiryService {
         repository.insert(id,protector.protect(command.name()),protector.hash("name:"+normalizeName(command.name())),
                 protector.protect(command.phone()),protector.hash("phone:"+command.phone()),last4(command.phone()),
                 command.interestedCourseId(),selectedCourse == null ? null : selectedCourse.name(),
+                acceptedPolicy.id(),
                 protector.protect(command.message()),command.consentPolicyVersion(),now);
         recordAudit(meta,"MGT-INQUIRY-SUBMIT","ANONYMOUS",null,"INQUIRY_SUBMITTED",id,
                 Map.of("courseSelected",command.interestedCourseId()!=null));
@@ -145,7 +155,7 @@ public class InquiryService {
     private InquiryDetail toDetail(InquiryRecord row,List<ActivityRecord> activities){ String phone=protector.reveal(row.phoneCiphertext());
         return new InquiryDetail(row.id(),row.version(),protector.reveal(row.nameCiphertext()),phone,displayPhone(phone),course(row.course()),
                 protector.reveal(row.messageCiphertext()),row.status(),row.readAt()!=null,row.readAt(),admin(row.readById(),row.readByName()),
-                new ConsentView(row.consentPolicyVersion(),row.consentedAt()),new NotificationView(row.notificationStatus(),row.notificationAttemptedAt()),
+                new ConsentView(row.consentPolicyVersion(),row.privacyPolicyRevisionId(),row.consentedAt()),new NotificationView(row.notificationStatus(),row.notificationAttemptedAt()),
                 allowed(row.status()),activities.stream().map(this::toActivity).toList()); }
     private ActivityView toActivity(ActivityRecord row){ return new ActivityView(row.id(),row.fromStatus(),row.toStatus(),
             protector.reveal(row.noteCiphertext()),admin(row.createdById(),row.createdByName()),row.createdAt()); }
@@ -157,12 +167,12 @@ public class InquiryService {
 
     private PublicSubmission normalize(PublicSubmission value){ if(value==null)throw new InquiryException("INQUIRY_INVALID");
         return new PublicSubmission(trim(value.name()),normalizePhone(value.phone()),value.interestedCourseId(),trim(value.message()),
-                value.privacyConsent(),trim(value.consentPolicyVersion()),trim(value.company())==null?"":trim(value.company())); }
+                value.privacyConsent(),trim(value.consentPolicyVersion()),value.privacyPolicyRevisionId(),trim(value.company())==null?"":trim(value.company())); }
     private void validateSubmission(PublicSubmission v){
         if(v.name()==null||v.name().isEmpty()||v.name().length()>50||v.message()==null||v.message().isEmpty()||v.message().length()>2000)
             throw new InquiryException("INQUIRY_INVALID");
         if(!Boolean.TRUE.equals(v.privacyConsent()))throw new InquiryException("PRIVACY_CONSENT_REQUIRED");
-        if(!currentPolicyVersion.equals(v.consentPolicyVersion()))throw new InquiryException("CONSENT_POLICY_VERSION_INVALID");
+        if(v.consentPolicyVersion()==null||v.consentPolicyVersion().isBlank())throw new InquiryException("CONSENT_POLICY_VERSION_INVALID");
     }
     private InquiryQuery validateQuery(String keyword,List<UUID> courses,List<String> statuses,LocalDate from,LocalDate to,String readState,int page,int size,LocalDate today){
         String k=trim(keyword); List<UUID> c=courses==null?List.of():List.copyOf(courses); List<String> s=statuses==null||statuses.isEmpty()?List.of("RECEIVED","CONTACTING"):statuses.stream().map(String::toUpperCase).toList();

@@ -56,6 +56,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/admin/students/*/consent-evidence-assets")
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/public/inquiries").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/public/privacy-policy").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/blog-posts", "/api/public/blog-posts/**",
                                 "/api/public/site-brand", "/api/public/home-page-content").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/blog-posts", "/api/admin/blog-posts/**")
@@ -113,11 +114,18 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/admin/consent-policies", "/api/admin/students/*/consents",
                                 "/api/admin/student-consents/*/evidence-url", "/api/admin/student-consents/*/public-artworks")
                                 .hasAuthority("CONSENT_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/public-privacy-policies/**")
+                                .hasAuthority("CONSENT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/consent-policies/*/draft",
                                 "/api/admin/consent-policies/draft/*/publish", "/api/admin/students/*/consents",
                                 "/api/admin/student-consents/*/revocation")
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/consent-policies/draft/*")
+                                .hasAuthority("CONSENT_WRITE")
+                        .requestMatchers(HttpMethod.POST, "/api/admin/public-privacy-policies/drafts",
+                                "/api/admin/public-privacy-policies/*/publication")
+                                .hasAuthority("CONSENT_WRITE")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/public-privacy-policies/drafts/*")
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/notifications", "/api/admin/notifications/*")
                                 .hasAuthority("NOTIFICATION_READ")

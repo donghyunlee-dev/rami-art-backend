@@ -90,14 +90,17 @@ public class JdbcInquiryRepository implements InquiryRepository {
     }
 
     @Override public void insert(UUID id, byte[] name, String nameHash, byte[] phone, String phoneHash,
-            String phoneLast4, UUID courseId, String courseNameSnapshot, byte[] message, String policyVersion, Instant now) {
+            String phoneLast4, UUID courseId, String courseNameSnapshot, UUID privacyPolicyRevisionId,
+            byte[] message, String policyVersion, Instant now) {
         jdbc.sql("""
                 insert into inquiry(id,name_ciphertext,name_hash,phone_ciphertext,phone_hash,phone_last4,
-                  interested_course_id,interested_course_name_snapshot,message_ciphertext,consent_policy_version,consented_at,received_at,retention_expires_at)
-                values(:id,:name,:name_hash,:phone,:phone_hash,:last4,:course,:course_name,:message,:policy,:now,:now,:now+interval '3 years')
+                  interested_course_id,interested_course_name_snapshot,privacy_policy_revision_id,
+                  message_ciphertext,consent_policy_version,consented_at,received_at,retention_expires_at)
+                values(:id,:name,:name_hash,:phone,:phone_hash,:last4,:course,:course_name,:privacy_policy,
+                  :message,:policy,:now,:now,:now+interval '3 years')
                 """).param("id",id).param("name",name).param("name_hash",nameHash).param("phone",phone)
                 .param("phone_hash",phoneHash).param("last4",phoneLast4).param("course",courseId)
-                .param("course_name",courseNameSnapshot)
+                .param("course_name",courseNameSnapshot).param("privacy_policy",privacyPolicyRevisionId)
                 .param("message",message).param("policy",policyVersion).param("now",odt(now)).update();
     }
 
@@ -183,7 +186,8 @@ public class JdbcInquiryRepository implements InquiryRepository {
         CourseRecord course=courseId==null?null:new CourseRecord(courseId,rs.getString("course_name"),rs.getBoolean("course_active"));
         return new InquiryRecord(rs.getObject("id",UUID.class),rs.getBytes("name_ciphertext"),rs.getBytes("phone_ciphertext"),
                 rs.getString("phone_last4"),rs.getBytes("message_ciphertext"),course,rs.getString("status"),
-                rs.getString("consent_policy_version"),instant(rs,"consented_at"),instant(rs,"received_at"),instant(rs,"read_at"),
+                rs.getString("consent_policy_version"),rs.getObject("privacy_policy_revision_id",UUID.class),
+                instant(rs,"consented_at"),instant(rs,"received_at"),instant(rs,"read_at"),
                 rs.getObject("read_by",UUID.class),rs.getString("read_by_name"),rs.getString("notification_status"),
                 instant(rs,"notification_attempted_at"),rs.getLong("version"),instant(rs,"last_activity_at"));
     }

@@ -15,8 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class RetentionService {
+    public static final int INQUIRY_RETENTION_MONTHS = 36;
+    public static final String INQUIRY_RETENTION_ANCHOR = "RECEIVED";
     private static final Map<String,String> RULES=Map.of(
-            "INQUIRY","retention_expires_at", "STUDENT_PRIVATE","terminal status + five years; referenced history excluded",
+            "INQUIRY","접수일 기준 3년; referenced history excluded", "STUDENT_PRIVATE","terminal status + five years; referenced history excluded",
             "CONSENT_EVIDENCE","revocation/expiry + five years", "TRANSFER_FILE","expires_at",
             "NOTIFICATION_PAYLOAD","terminal completion + one year");
     private static final String POLICY="2026-10-09-v1";

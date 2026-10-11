@@ -9,7 +9,12 @@ public final class InquiryModels {
     private InquiryModels() {}
 
     public record PublicSubmission(String name, String phone, UUID interestedCourseId, String message,
-            Boolean privacyConsent, String consentPolicyVersion, String company) {}
+            Boolean privacyConsent, String consentPolicyVersion, UUID privacyPolicyRevisionId, String company) {
+        public PublicSubmission(String name, String phone, UUID interestedCourseId, String message,
+                Boolean privacyConsent, String consentPolicyVersion, String company) {
+            this(name, phone, interestedCourseId, message, privacyConsent, consentPolicyVersion, null, company);
+        }
+    }
     public record Accepted(boolean accepted) {}
     public record CourseView(UUID courseId, String name, boolean active) {}
     public record InquiryQuery(String keyword, List<UUID> courseIds, List<String> statuses,
@@ -22,7 +27,7 @@ public final class InquiryModels {
     public record InquiryPage(int page, int size, long totalElements, int totalPages,
             Summary summary, List<InquirySummary> items) {}
     public record AdminView(UUID adminUserId, String displayName) {}
-    public record ConsentView(String policyVersion, Instant consentedAt) {}
+    public record ConsentView(String policyVersion, UUID privacyPolicyRevisionId, Instant consentedAt) {}
     public record NotificationView(String status, Instant attemptedAt) {}
     public record ActivityView(UUID activityId, String fromStatus, String toStatus, String note,
             AdminView createdBy, Instant createdAt) {}

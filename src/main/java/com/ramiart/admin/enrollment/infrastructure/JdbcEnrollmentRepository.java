@@ -15,8 +15,16 @@ public class JdbcEnrollmentRepository implements EnrollmentRepository {
     private final JdbcClient jdbc;
     public JdbcEnrollmentRepository(JdbcClient jdbc){this.jdbc=jdbc;}
 
-    public Optional<InquiryLead> findInquiry(UUID id){return jdbc.sql("select id,name_ciphertext,phone_ciphertext,interested_course_id from inquiry where id=:id")
-            .param("id",id).query((r,n)->new InquiryLead(r.getObject(1,UUID.class),r.getBytes(2),r.getBytes(3),r.getObject(4,UUID.class))).optional();}
+    public Optional<InquiryLead> findInquiry(UUID id){return jdbc.sql("""
+            select i.id,i.name_ciphertext,i.phone_ciphertext,i.interested_course_id,
+              coalesce(i.interested_course_name_snapshot,c.name) course_name,i.privacy_policy_revision_id,
+              i.consent_policy_version,i.consented_at
+            from inquiry i left join course c on c.id=i.interested_course_id where i.id=:id
+            """)
+            .param("id",id).query((r,n)->new InquiryLead(r.getObject("id",UUID.class),r.getBytes("name_ciphertext"),
+                    r.getBytes("phone_ciphertext"),r.getObject("interested_course_id",UUID.class),r.getString("course_name"),
+                    r.getObject("privacy_policy_revision_id",UUID.class),r.getString("consent_policy_version"),
+                    instant(r,"consented_at"))).optional();}
     public Optional<UUID> findCaseByInquiry(UUID id){return jdbc.sql("select id from enrollment_case where inquiry_id=:id").param("id",id).query(UUID.class).optional();}
     public CaseRecordsPage findPage(List<String> statuses,UUID courseId,Instant from,Instant to,int page,int size){
         String where=" where e.status=any(cast(:statuses as text[])) and e.updated_at>=:from and e.updated_at<:to";
