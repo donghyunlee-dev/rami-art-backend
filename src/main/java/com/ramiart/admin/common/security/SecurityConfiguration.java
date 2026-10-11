@@ -56,6 +56,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/admin/students/*/consent-evidence-assets")
                                 .hasAuthority("CONSENT_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/public/inquiries").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/public/inquiries/course-options").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/privacy-policy").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/blog-posts", "/api/public/blog-posts/**",
                                 "/api/public/site-brand", "/api/public/home-page-content").permitAll()
