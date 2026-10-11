@@ -205,6 +205,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/admin/director-profile",
                                 "/api/admin/director-profile/drafts/*/preview")
                                 .hasAuthority("CONTENT_PROFILE_READ")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/director-profile/consent-options")
+                                .hasAuthority("CONSENT_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/director-profile/drafts",
                                 "/api/admin/director-profile/publications")
                                 .hasAuthority("CONTENT_PROFILE_WRITE")

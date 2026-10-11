@@ -79,6 +79,7 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'CLASS_PROGRAM' then (select x.course_id from class_program x where x.id=r.owner_id)
                          when 'SITE_BRAND_CONFIG' then r.owner_id
                          when 'HOME_PAGE_CONTENT' then r.owner_id
+                         when 'DIRECTOR_PROFILE' then r.owner_id
                        end target_id,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then (select x.title from gallery_artwork x where x.id=r.owner_id)
@@ -86,6 +87,7 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'CLASS_PROGRAM' then (select x.title from class_program x where x.id=r.owner_id)
                          when 'SITE_BRAND_CONFIG' then (select x.brand_name from site_brand_config x where x.id=r.owner_id)
                          when 'HOME_PAGE_CONTENT' then '홈페이지 구성'
+                         when 'DIRECTOR_PROFILE' then '소개 페이지'
                        end title,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then exists(
@@ -98,6 +100,18 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'CLASS_PROGRAM' then exists(select 1 from class_program x where x.id=r.owner_id and x.status='PUBLISHED' and x.visible)
                          when 'SITE_BRAND_CONFIG' then exists(select 1 from site_brand_config x where x.id=r.owner_id and x.status='PUBLISHED')
                          when 'HOME_PAGE_CONTENT' then exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='PUBLISHED')
+                         when 'DIRECTOR_PROFILE' then exists(
+                           select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED' and (
+                             (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id
+                               and (p.portrait_student_consent_id is null or exists(
+                               select 1 from student_consent c where c.id=p.portrait_student_consent_id and c.policy_type='MEDIA_PUBLICATION' and c.status='ACTIVE'
+                                 and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date))))
+                             or exists(select 1 from director_facility f where f.director_profile_id=p.id and f.visible
+                               and f.media_asset_id=r.asset_id and r.field_name=('facilityImage:' || f.id::text)
+                               and (f.student_consent_id is null or exists(select 1 from student_consent c where c.id=f.student_consent_id and c.policy_type='MEDIA_PUBLICATION'
+                                 and c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date)))
+                             )
+                           ))
                          else false
                        end currently_public,
                        case r.owner_type
@@ -129,10 +143,27 @@ public class JdbcMediaRepository implements MediaRepository {
                            when exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='PUBLISHED') then 'PUBLIC'
                            when exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='DRAFT') then 'DRAFT'
                            else 'ARCHIVED' end
+                         when 'DIRECTOR_PROFILE' then case
+                           when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED') and exists(
+                             select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED' and (
+                               (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id
+                                 and (p.portrait_student_consent_id is null or exists(
+                                 select 1 from student_consent c where c.id=p.portrait_student_consent_id and c.policy_type='MEDIA_PUBLICATION' and c.status='ACTIVE'
+                                   and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date))))
+                               or exists(select 1 from director_facility f where f.director_profile_id=p.id and f.visible
+                                 and f.media_asset_id=r.asset_id and r.field_name=('facilityImage:' || f.id::text)
+                                 and (f.student_consent_id is null or exists(select 1 from student_consent c where c.id=f.student_consent_id and c.policy_type='MEDIA_PUBLICATION'
+                                   and c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date)))
+                               )
+                             )) then 'PUBLIC'
+                           when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED')
+                             and (r.field_name='portrait' or r.field_name like 'facilityImage:%') then 'CONSENT_BLOCKED'
+                           when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='DRAFT') then 'DRAFT'
+                           else 'ARCHIVED' end
                          else 'ARCHIVED'
                        end public_state
                   from media_asset_reference r
-                 where r.asset_id=:id and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG','HOME_PAGE_CONTENT')
+                 where r.asset_id=:id and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG','HOME_PAGE_CONTENT','DIRECTOR_PROFILE')
                  order by currently_public desc, r.owner_type, r.owner_id
                 """)
                 .param("id", id).query((rs, ignored) -> new AssetReference(
