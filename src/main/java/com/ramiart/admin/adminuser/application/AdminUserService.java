@@ -12,6 +12,7 @@ import com.ramiart.admin.auth.application.AuditRecorder.Event;
 import com.ramiart.admin.auth.application.AuthSessionRepository.RequestMetadata;
 import com.ramiart.admin.inquiry.application.InquiryDataProtector;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ramiart.admin.auth.application.PasswordVerifier;
 import com.ramiart.admin.auth.domain.EmailAddress;
@@ -94,7 +95,7 @@ public class AdminUserService {
         int consumed = jdbc.sql("update idempotency_record set sensitive_response_revealed_at=statement_timestamp() where scope=:scope and idempotency_key=:key and sensitive_response_revealed_at is null")
                 .param("scope",scope).param("key",key).update();
         if (consumed != 1) throw new AdminUserException("SENSITIVE_IDEMPOTENCY_RESPONSE_CONSUMED");
-        try { return mapper.readValue(protector.reveal((byte[])prior[2]), CreatedResponse.class); }
+        try { return readSnapshot(protector.reveal((byte[])prior[2]), CreatedResponse.class); }
         catch (Exception exception) { throw new AdminUserException("ADMIN_USER_CREATE_FAILED"); }
     }
 
@@ -279,7 +280,7 @@ public class AdminUserService {
         int consumed=jdbc.sql("update idempotency_record set sensitive_response_revealed_at=statement_timestamp() where scope=:scope and idempotency_key=:key and sensitive_response_revealed_at is null")
                 .param("scope",scope).param("key",key).update();
         if(consumed!=1)throw new AdminUserException("SENSITIVE_IDEMPOTENCY_RESPONSE_CONSUMED");
-        try{return mapper.readValue(protector.reveal((byte[])prior[2]),TemporaryPasswordResponse.class);}
+        try{return readSnapshot(protector.reveal((byte[])prior[2]),TemporaryPasswordResponse.class);}
         catch(Exception exception){throw new AdminUserException("ADMIN_USER_CREATE_FAILED");}
     }
 
@@ -304,8 +305,14 @@ public class AdminUserService {
     private <T> T snapshot(String scope,UUID key,Class<T> type) {
         byte[] encrypted=jdbc.sql("select encrypted_response from idempotency_record where scope=:scope and idempotency_key=:key")
                 .param("scope",scope).param("key",key).query(byte[].class).optional().orElseThrow(()->new AdminUserException("IDEMPOTENCY_IN_PROGRESS"));
-        try{return mapper.readValue(protector.reveal(encrypted),type);}
+        try{return readSnapshot(protector.reveal(encrypted),type);}
         catch(Exception exception){throw new AdminUserException("ADMIN_USER_UPDATE_FAILED");}
+    }
+
+    private <T> T readSnapshot(String json, Class<T> type) throws java.io.IOException {
+        return mapper.readerFor(type)
+                .without(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
+                .readValue(json);
     }
 
     private long ownerCount() {

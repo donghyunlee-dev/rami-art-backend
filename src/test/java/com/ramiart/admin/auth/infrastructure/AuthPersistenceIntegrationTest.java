@@ -189,6 +189,19 @@ class AuthPersistenceIntegrationTest {
         return new com.fasterxml.jackson.databind.ObjectMapper().readTree(response).path("data");
     }
 
+    private void assertKstTimestamps(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                if (entry.getValue().isTextual() && entry.getKey().matches(".*(At|Until)$")) {
+                    assertThat(entry.getValue().asText()).as(entry.getKey()).endsWith("+09:00");
+                }
+                assertKstTimestamps(entry.getValue());
+            });
+        } else if (node.isArray()) {
+            node.forEach(this::assertKstTimestamps);
+        }
+    }
+
     @DynamicPropertySource
     static void configureDataSource(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", AuthPersistenceIntegrationTest::jdbcUrl);
@@ -1022,6 +1035,10 @@ class AuthPersistenceIntegrationTest {
                 "http://localhost:3000", body, key.toString());
         HttpResponse<String> replay = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
                 "http://localhost:3000", body, key.toString());
+        HttpResponse<String> reusedBody = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
+                "http://localhost:3000", "{\"roleCode\":\"FINANCE\",\"version\":0}", key.toString());
+        HttpResponse<String> reusedPath = http("PUT", "/api/admin/users/" + ownerId + "/role", ownerCookie,
+                "http://localhost:3000", "{\"roleCode\":\"CONTENT\",\"version\":1}", key.toString());
         HttpResponse<String> stale = http("PUT", "/api/admin/users/" + targetId + "/role", ownerCookie,
                 "http://localhost:3000", "{\"roleCode\":\"FINANCE\",\"version\":0}", UUID.randomUUID().toString());
         jdbcTemplate.update("update admin_user_role set admin_role_id=(select id from admin_role where code='OPERATOR') where admin_user_id=(select id from admin_user where email=?)", OWNER_EMAIL);
@@ -1030,8 +1047,14 @@ class AuthPersistenceIntegrationTest {
 
         assertThat(changed.statusCode()).as(changed.body()).isEqualTo(200);
         assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertKstTimestamps(responseData(changed.body()));
+        assertKstTimestamps(responseData(replay.body()));
         assertThat(responseData(replay.body())).isEqualTo(responseData(changed.body()));
         assertThat(changed.body()).contains("CONTENT", "version", "currentSessionImpact");
+        assertThat(reusedBody.statusCode()).isEqualTo(409);
+        assertThat(reusedBody.body()).contains("IDEMPOTENCY_KEY_REUSED");
+        assertThat(reusedPath.statusCode()).isEqualTo(409);
+        assertThat(reusedPath.body()).contains("IDEMPOTENCY_KEY_REUSED");
         assertThat(stale.statusCode()).isEqualTo(409);
         assertThat(lastOwner.statusCode()).isEqualTo(409);
         assertThat(lastOwner.body()).contains("LAST_OWNER_REQUIRED");
@@ -1053,6 +1076,8 @@ class AuthPersistenceIntegrationTest {
 
         assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
         assertThat(replay.statusCode()).as(replay.body()).isEqualTo(201);
+        assertKstTimestamps(responseData(created.body()));
+        assertKstTimestamps(responseData(replay.body()));
         assertThat(responseData(replay.body())).isEqualTo(responseData(created.body()));
         assertThat(created.body()).contains("temporaryPassword", "temporaryPasswordExpiresAt");
         var passwordPattern = java.util.regex.Pattern.compile("\\\"temporaryPassword\\\":\\\"([^\\\"]+)\\\"");
@@ -1085,11 +1110,14 @@ class AuthPersistenceIntegrationTest {
 
         assertThat(changed.statusCode()).as(changed.body()).isEqualTo(201);
         assertThat(replay.statusCode()).isEqualTo(201);
+        assertKstTimestamps(responseData(changed.body()));
+        assertKstTimestamps(responseData(replay.body()));
         assertThat(responseData(replay.body())).isEqualTo(responseData(changed.body()));
         assertThat(changed.body()).contains("INACTIVE", "revokedSessionCount");
         assertThat(self.statusCode()).isEqualTo(422);
         assertThat(http("GET", "/api/admin/auth/sessions/current", "__Host-rami_admin_session=" + targetToken, null, null).statusCode()).isEqualTo(401);
         assertThat(jdbcTemplate.queryForObject("select count(*) from admin_session where admin_user_id=? and revoke_reason='USER_DISABLED'", Integer.class, targetId)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select version from admin_user where id=?", Long.class, targetId)).isEqualTo(2L);
         assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action='ADMIN_STATUS_CHANGED' and target_id=?", Integer.class, targetId)).isOne();
     }
 
@@ -1114,9 +1142,13 @@ class AuthPersistenceIntegrationTest {
 
         assertThat(unlocked.statusCode()).as(unlocked.body()).isEqualTo(201);
         assertThat(unlockReplay.statusCode()).isEqualTo(201);
+        assertKstTimestamps(responseData(unlocked.body()));
+        assertKstTimestamps(responseData(unlockReplay.body()));
         assertThat(responseData(unlockReplay.body())).isEqualTo(responseData(unlocked.body()));
         assertThat(issued.statusCode()).as(issued.body()).isEqualTo(201);
         assertThat(replay.statusCode()).isEqualTo(201);
+        assertKstTimestamps(responseData(issued.body()));
+        assertKstTimestamps(responseData(replay.body()));
         assertThat(responseData(replay.body())).isEqualTo(responseData(issued.body()));
         assertThat(consumed.statusCode()).isEqualTo(409);
         assertThat(issued.body()).contains("temporaryPassword", "passwordMustChange");
