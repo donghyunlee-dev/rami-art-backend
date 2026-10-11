@@ -19,8 +19,33 @@ public class JdbcInquiryRepository implements InquiryRepository {
     private final JdbcClient jdbc;
     public JdbcInquiryRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
-    @Override public boolean activeCourseExists(UUID id) {
-        return jdbc.sql("select exists(select 1 from course where id=:id and active)").param("id", id).query(Boolean.class).single();
+    @Override public Optional<CourseRecord> findPublicCourseForSubmission(UUID id) {
+        return jdbc.sql(publicCourseSelect() + " and c.id=:id order by c.display_order,c.name,c.id for share of c")
+                .param("id", id).query(this::mapCourse).optional();
+    }
+
+    @Override public List<CourseRecord> findPublicCourseOptions() {
+        return jdbc.sql(publicCourseSelect() + " order by c.display_order,c.name,c.id")
+                .query(this::mapCourse).list();
+    }
+
+    private static String publicCourseSelect() {
+        return """
+                select c.id,c.name,c.active from course c
+                join class_program p on p.course_id=c.id and p.status='PUBLISHED' and p.visible=true
+                where c.active=true and c.age_guide is not null and c.session_duration_minutes is not null
+                  and c.weekly_sessions is not null
+                  and p.audience_label is not distinct from c.age_guide
+                  and p.session_duration_minutes is not distinct from c.session_duration_minutes
+                  and p.weekly_sessions is not distinct from c.weekly_sessions
+                  and p.audience_label is not null and p.title is not null and p.description is not null
+                  and jsonb_array_length(p.activities) between 1 and 10
+                  and p.media_asset_id is not null and p.alt_text is not null
+                """;
+    }
+
+    private CourseRecord mapCourse(ResultSet rs,int n)throws SQLException {
+        return new CourseRecord(rs.getObject("id",UUID.class),rs.getString("name"),rs.getBoolean("active"));
     }
 
     @Override public boolean coursesExist(List<UUID> ids) {
@@ -65,13 +90,14 @@ public class JdbcInquiryRepository implements InquiryRepository {
     }
 
     @Override public void insert(UUID id, byte[] name, String nameHash, byte[] phone, String phoneHash,
-            String phoneLast4, UUID courseId, byte[] message, String policyVersion, Instant now) {
+            String phoneLast4, UUID courseId, String courseNameSnapshot, byte[] message, String policyVersion, Instant now) {
         jdbc.sql("""
                 insert into inquiry(id,name_ciphertext,name_hash,phone_ciphertext,phone_hash,phone_last4,
-                  interested_course_id,message_ciphertext,consent_policy_version,consented_at,received_at,retention_expires_at)
-                values(:id,:name,:name_hash,:phone,:phone_hash,:last4,:course,:message,:policy,:now,:now,:now+interval '3 years')
+                  interested_course_id,interested_course_name_snapshot,message_ciphertext,consent_policy_version,consented_at,received_at,retention_expires_at)
+                values(:id,:name,:name_hash,:phone,:phone_hash,:last4,:course,:course_name,:message,:policy,:now,:now,:now+interval '3 years')
                 """).param("id",id).param("name",name).param("name_hash",nameHash).param("phone",phone)
                 .param("phone_hash",phoneHash).param("last4",phoneLast4).param("course",courseId)
+                .param("course_name",courseNameSnapshot)
                 .param("message",message).param("policy",policyVersion).param("now",odt(now)).update();
     }
 
@@ -93,7 +119,7 @@ public class JdbcInquiryRepository implements InquiryRepository {
         bind(base,q,keywordHash,staleBefore);
         long[] counts = base.query((rs,n)->new long[]{rs.getLong("total"),rs.getLong("unread"),rs.getLong("stale")}).single();
         var query = jdbc.sql("""
-                select i.*, c.name course_name, c.active course_active,
+                select i.*, coalesce(i.interested_course_name_snapshot,c.name) course_name, c.active course_active,
                   u.display_name read_by_name, coalesce(max(a.created_at),i.received_at) last_activity_at
                 from inquiry i left join course c on c.id=i.interested_course_id
                 left join admin_user u on u.id=i.read_by left join inquiry_activity a on a.inquiry_id=i.id
@@ -115,7 +141,7 @@ public class JdbcInquiryRepository implements InquiryRepository {
 
     @Override public Optional<InquiryRecord> find(UUID id) {
         return jdbc.sql("""
-                select i.*,c.name course_name,c.active course_active,u.display_name read_by_name,
+                select i.*,coalesce(i.interested_course_name_snapshot,c.name) course_name,c.active course_active,u.display_name read_by_name,
                   coalesce((select max(created_at) from inquiry_activity where inquiry_id=i.id),i.received_at) last_activity_at
                 from inquiry i left join course c on c.id=i.interested_course_id left join admin_user u on u.id=i.read_by
                 where i.id=:id

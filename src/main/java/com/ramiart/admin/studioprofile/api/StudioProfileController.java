@@ -53,7 +53,7 @@ public class StudioProfileController {
             HttpServletRequest request) {
         return admin(service.updateDraft(draftId, parse(body,
                 Set.of("version", "studioName", "phone", "email", "address", "addressDetail", "latitude",
-                        "longitude", "businessHours", "closedDays", "transitGuide", "parkingGuide"), Write.class),
+                        "longitude", "businessHours", "closedDays", "transitGuide", "parkingGuide", "faqs"), Write.class),
                 key, auth, metadata(request)).data(), request);
     }
 
@@ -114,6 +114,24 @@ public class StudioProfileController {
                         throw new com.ramiart.admin.studioprofile.application.StudioProfileException(
                                 "VALIDATION_ERROR", "businessHours[" + i + "]." + field);
                 }
+            }
+        }
+        if (raw.has("faqs") && raw.get("faqs").isArray()) {
+            for (int i = 0; i < raw.get("faqs").size(); i++) {
+                JsonNode faq = raw.get("faqs").get(i);
+                if (!faq.isObject()) throw new com.ramiart.admin.studioprofile.application.StudioProfileException(
+                        "VALIDATION_ERROR", "faqs[" + i + "]");
+                Set<String> requiredFaqFields = Set.of("faqId", "question", "answer", "displayOrder", "visible");
+                var faqFields = faq.fieldNames();
+                while (faqFields.hasNext()) {
+                    String field = faqFields.next();
+                    if (!requiredFaqFields.contains(field))
+                        throw new com.ramiart.admin.studioprofile.application.StudioProfileException(
+                                "VALIDATION_ERROR", "faqs[" + i + "]." + field);
+                }
+                if (!requiredFaqFields.stream().allMatch(faq::has))
+                    throw new com.ramiart.admin.studioprofile.application.StudioProfileException(
+                            "VALIDATION_ERROR", "faqs[" + i + "]");
             }
         }
         try { return mapper.treeToValue(raw, type); }

@@ -9,12 +9,14 @@ public final class StudioProfileModels {
     private StudioProfileModels() {}
 
     public record BusinessHour(int day, boolean closed, String open, String close) {}
+    public record Faq(UUID faqId, String question, String answer, int displayOrder, boolean visible) {}
     public record Write(Long version, String studioName, String phone, String email, String address,
             String addressDetail, BigDecimal latitude, BigDecimal longitude,
-            List<BusinessHour> businessHours, String closedDays, String transitGuide, String parkingGuide) {}
+            List<BusinessHour> businessHours, String closedDays, String transitGuide, String parkingGuide,
+            List<Faq> faqs) {}
     public record StoredProfile(UUID id, Integer revision, String status, Long version,
             String studioName, String phone, String email, String address, String addressDetail,
-            BigDecimal latitude, BigDecimal longitude, String businessHoursJson, String closedDays,
+            BigDecimal latitude, BigDecimal longitude, String businessHoursJson, String faqsJson, String closedDays,
             String transitGuide, String parkingGuide, Instant updatedAt, Instant publishedAt) {}
     public record Actions(boolean canCreateDraft, boolean canSave, boolean canPreview,
             boolean canEdit, boolean canPublish) {}
@@ -22,17 +24,17 @@ public final class StudioProfileModels {
             String sourceStatus, boolean editable, Long version, String studioName, String phone,
             String email, String address, String addressDetail, BigDecimal latitude,
             BigDecimal longitude, List<BusinessHour> businessHours, String closedDays,
-            String transitGuide, String parkingGuide, boolean publishable, Actions actions,
+            String transitGuide, String parkingGuide, List<Faq> faqs, boolean publishable, Actions actions,
             Instant updatedAt) {}
     public record Coordinates(BigDecimal latitude, BigDecimal longitude) {}
     public record PublicView(int revision, String studioName, String phone, String email,
             String address, String addressDetail, Coordinates coordinates,
             List<BusinessHour> businessHours, String closedDays, String transitGuide,
-            String parkingGuide, Instant publishedAt) {}
+            String parkingGuide, List<Faq> faqs, Instant publishedAt) {}
     public record PlacementPreview(String placement, int revision, String studioName, String phone,
             String email, String address, String addressDetail, Coordinates coordinates,
             List<BusinessHour> businessHours, String closedDays, String transitGuide,
-            String parkingGuide) {}
+            String parkingGuide, List<Faq> faqs) {}
     public record Preview(UUID draftId, long version, List<PlacementPreview> placements) {}
     public record Publication(UUID profileId, int revision, String status, long version, Instant publishedAt) {}
     public record PublicationRequest(UUID draftId, Long draftVersion) {}

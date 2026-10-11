@@ -15,6 +15,7 @@ public final class InquiryModels {
     public record InquiryQuery(String keyword, List<UUID> courseIds, List<String> statuses,
             Instant fromInclusive, Instant toExclusive, String readState, int page, int size) {}
     public record CourseOption(UUID courseId, String name, boolean active) {}
+    public record PublicCourseOption(UUID courseId, String name) {}
     public record InquirySummary(UUID inquiryId, String name, String maskedPhone, CourseView interestedCourse,
             String status, boolean read, Instant receivedAt, Instant lastActivityAt, boolean stale) {}
     public record Summary(long unreadCount, long staleCount) {}

@@ -47,15 +47,16 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
         try {
             jdbc.sql("""
                     insert into studio_profile(id,revision,status,based_on_profile_id,studio_name,phone,email,address,
-                      address_detail,latitude,longitude,business_hours,closed_days,transit_guide,parking_guide,created_by)
+                      address_detail,latitude,longitude,business_hours,faqs,closed_days,transit_guide,parking_guide,created_by)
                     values(:id,:revision,'DRAFT',:based,:name,:phone,:email,:address,:addressDetail,:latitude,:longitude,
-                      cast(:hours as jsonb),:closedDays,:transitGuide,:parkingGuide,:actor)
+                      cast(:hours as jsonb),cast(:faqs as jsonb),:closedDays,:transitGuide,:parkingGuide,:actor)
                     """)
                     .param("id", id).param("revision", maxRevision() + 1).param("based", basedOn)
                     .param("name", write.studioName()).param("phone", write.phone()).param("email", write.email())
                     .param("address", write.address()).param("addressDetail", write.addressDetail())
                     .param("latitude", write.latitude()).param("longitude", write.longitude())
                     .param("hours", mapper.writeValueAsString(write.businessHours()))
+                    .param("faqs", mapper.writeValueAsString(write.faqs()))
                     .param("closedDays", write.closedDays()).param("transitGuide", write.transitGuide())
                     .param("parkingGuide", write.parkingGuide()).param("actor", actor).update();
         } catch (JacksonException exception) {
@@ -69,7 +70,7 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
             return jdbc.sql("""
                     update studio_profile set studio_name=:name,phone=:phone,email=:email,address=:address,
                       address_detail=:addressDetail,latitude=:latitude,longitude=:longitude,
-                      business_hours=cast(:hours as jsonb),closed_days=:closedDays,transit_guide=:transitGuide,
+                      business_hours=cast(:hours as jsonb),faqs=cast(:faqs as jsonb),closed_days=:closedDays,transit_guide=:transitGuide,
                       parking_guide=:parkingGuide,version=version+1
                     where id=:id and status='DRAFT' and version=:version
                     """)
@@ -77,6 +78,7 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
                     .param("address", write.address()).param("addressDetail", write.addressDetail())
                     .param("latitude", write.latitude()).param("longitude", write.longitude())
                     .param("hours", mapper.writeValueAsString(write.businessHours()))
+                    .param("faqs", mapper.writeValueAsString(write.faqs()))
                     .param("closedDays", write.closedDays()).param("transitGuide", write.transitGuide())
                     .param("parkingGuide", write.parkingGuide()).param("id", id).param("version", write.version()).update();
         } catch (JacksonException exception) {
@@ -118,7 +120,7 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
     private static String select() {
         return """
                 select id,revision,status,version,studio_name,phone,email,address,address_detail,latitude,longitude,
-                  business_hours::text business_hours_json,closed_days,transit_guide,parking_guide,updated_at,published_at
+                  business_hours::text business_hours_json,faqs::text faqs_json,closed_days,transit_guide,parking_guide,updated_at,published_at
                 from studio_profile
                 """;
     }
@@ -127,7 +129,7 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
         return new StoredProfile(rs.getObject("id", UUID.class), rs.getInt("revision"), rs.getString("status"),
                 rs.getLong("version"), rs.getString("studio_name"), rs.getString("phone"), rs.getString("email"),
                 rs.getString("address"), rs.getString("address_detail"), rs.getBigDecimal("latitude"),
-                rs.getBigDecimal("longitude"), rs.getString("business_hours_json"), rs.getString("closed_days"),
+                rs.getBigDecimal("longitude"), rs.getString("business_hours_json"), rs.getString("faqs_json"), rs.getString("closed_days"),
                 rs.getString("transit_guide"), rs.getString("parking_guide"), rs.getTimestamp("updated_at").toInstant(),
                 rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toInstant());
     }

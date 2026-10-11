@@ -17,14 +17,15 @@ public interface InquiryRepository {
             UUID createdById, String createdByName, Instant createdAt) {}
     record PageRecords(List<InquiryRecord> items, long total, long unread, long stale) {}
 
-    boolean activeCourseExists(UUID id);
+    Optional<CourseRecord> findPublicCourseForSubmission(UUID id);
+    List<CourseRecord> findPublicCourseOptions();
     boolean coursesExist(List<UUID> ids);
     List<CourseRecord> findCourseOptions();
     int incrementRateLimit(String type, String bucketHash, Instant windowStart);
     Claim claim(String scope, UUID key, String requestHash);
     void complete(String scope, UUID key, UUID resourceId, int status);
     void insert(UUID id, byte[] name, String nameHash, byte[] phone, String phoneHash, String phoneLast4,
-            UUID courseId, byte[] message, String policyVersion, Instant now);
+            UUID courseId, String courseNameSnapshot, byte[] message, String policyVersion, Instant now);
     PageRecords findPage(InquiryQuery query, String keywordHash, Instant staleBefore);
     Optional<InquiryRecord> find(UUID id);
     List<ActivityRecord> findActivities(UUID id);

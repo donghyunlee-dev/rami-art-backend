@@ -93,11 +93,12 @@ public class StudioProfileService {
                 .orElseThrow(() -> new StudioProfileException("STUDIO_PROFILE_NOT_FOUND"));
         if (draft.version() != version) throw new StudioProfileException("STUDIO_PROFILE_VERSION_CONFLICT");
         List<BusinessHour> hours = hours(draft.businessHoursJson());
+        List<Faq> faqs = faqs(draft.faqsJson());
         Coordinates coordinates = coordinates(draft);
         List<PlacementPreview> placements = List.of("HOME", "CONTACT", "FOOTER").stream()
                 .map(placement -> new PlacementPreview(placement, draft.revision(), draft.studioName(),
                         draft.phone(), draft.email(), draft.address(), draft.addressDetail(), coordinates,
-                        hours, draft.closedDays(), draft.transitGuide(), draft.parkingGuide())).toList();
+                        hours, draft.closedDays(), draft.transitGuide(), draft.parkingGuide(), faqs)).toList();
         return new Preview(draft.id(), draft.version(), placements);
     }
 
@@ -130,7 +131,7 @@ public class StudioProfileService {
         return new PublicView(published.revision(), published.studioName(), published.phone(),
                 published.email(), published.address(), published.addressDetail(), coordinates(published),
                 hours(published.businessHoursJson()), published.closedDays(), published.transitGuide(),
-                published.parkingGuide(), published.publishedAt());
+                published.parkingGuide(), faqs(published.faqsJson()).stream().filter(Faq::visible).toList(), published.publishedAt());
     }
 
     private AdminView admin(StoredProfile profile, boolean editable, boolean createDraft) {
@@ -139,7 +140,7 @@ public class StudioProfileService {
                 editable ? "DRAFT" : profile.status(), editable, profile.version(), profile.studioName(),
                 profile.phone(), profile.email(), profile.address(), profile.addressDetail(), profile.latitude(),
                 profile.longitude(), hours(profile.businessHoursJson()), profile.closedDays(), profile.transitGuide(),
-                profile.parkingGuide(), publishable, new Actions(createDraft, editable, editable, editable, publishable),
+                profile.parkingGuide(), faqs(profile.faqsJson()), publishable, new Actions(createDraft, editable, editable, editable, publishable),
                 profile.updatedAt());
     }
 
@@ -158,8 +159,9 @@ public class StudioProfileService {
         String transitGuide = optional(raw.transitGuide());
         String parkingGuide = optional(raw.parkingGuide());
         List<BusinessHour> businessHours = normalizeHours(raw.businessHours());
+        List<Faq> faqs = normalizeFaqs(raw.faqs());
         return new Write(raw.version(), trim(raw.studioName()), phone, email, trim(raw.address()), addressDetail,
-                raw.latitude(), raw.longitude(), businessHours, closedDays, transitGuide, parkingGuide);
+                raw.latitude(), raw.longitude(), businessHours, closedDays, transitGuide, parkingGuide, faqs);
     }
 
     private static void validatePublishable(Write write) {
@@ -181,6 +183,26 @@ public class StudioProfileService {
         optionalLength(write.closedDays(), 300, "closedDays");
         optionalLength(write.transitGuide(), 500, "transitGuide");
         optionalLength(write.parkingGuide(), 500, "parkingGuide");
+        normalizeFaqs(write.faqs());
+    }
+
+    private static List<Faq> normalizeFaqs(List<Faq> values) {
+        if (values == null || values.size() > 30) throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+        Set<UUID> ids = new HashSet<>();
+        Set<Integer> orders = new HashSet<>();
+        List<Faq> result = new ArrayList<>();
+        for (Faq faq : values) {
+            if (faq == null || faq.faqId() == null || !ids.add(faq.faqId()) || faq.displayOrder() < 0
+                    || !orders.add(faq.displayOrder())) throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+            String question = faq.question() == null ? null : faq.question().trim();
+            String answer = faq.answer() == null ? null : faq.answer().trim();
+            if (question == null || question.isEmpty() || question.length() > 200
+                    || answer == null || answer.isEmpty() || answer.length() > 2000)
+                throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+            result.add(new Faq(faq.faqId(), question, answer, faq.displayOrder(), faq.visible()));
+        }
+        result.sort(java.util.Comparator.comparingInt(Faq::displayOrder));
+        return List.copyOf(result);
     }
 
     private static List<BusinessHour> normalizeHours(List<BusinessHour> values) {
@@ -228,15 +250,20 @@ public class StudioProfileService {
     private static boolean length(String value, int min, int max) { return value != null && value.length() >= min && value.length() <= max; }
     private static String trim(String value) { return value == null ? null : value.trim(); }
     private static String optional(String value) { String trimmed = trim(value); return trimmed == null || trimmed.isEmpty() ? null : trimmed; }
-    private static Write emptyDraft() { return new Write(0L, "", "", "", "", null, null, null, List.of(), null, null, null); }
+    private static Write emptyDraft() { return new Write(0L, "", "", "", "", null, null, null, List.of(), null, null, null, List.of()); }
     private static Write from(StoredProfile p) { return new Write(p.version(), p.studioName(), p.phone(), p.email(), p.address(),
-            p.addressDetail(), p.latitude(), p.longitude(), hours(p.businessHoursJson()), p.closedDays(), p.transitGuide(), p.parkingGuide()); }
+            p.addressDetail(), p.latitude(), p.longitude(), hours(p.businessHoursJson()), p.closedDays(), p.transitGuide(), p.parkingGuide(), faqs(p.faqsJson())); }
     private static Coordinates coordinates(StoredProfile p) { return p.latitude() == null ? null : new Coordinates(p.latitude(), p.longitude()); }
     private static Publication publication(StoredProfile p) { return new Publication(p.id(), p.revision(), p.status(), p.version(), p.publishedAt()); }
     private static List<BusinessHour> hours(String json) {
         try { return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json,
                 new com.fasterxml.jackson.core.type.TypeReference<List<BusinessHour>>() {}); }
         catch (com.fasterxml.jackson.core.JacksonException exception) { throw new IllegalStateException("Invalid business hours JSON", exception); }
+    }
+    private static List<Faq> faqs(String json) {
+        try { return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json,
+                new com.fasterxml.jackson.core.type.TypeReference<List<Faq>>() {}); }
+        catch (com.fasterxml.jackson.core.JacksonException exception) { throw new IllegalStateException("Invalid studio profile FAQs JSON", exception); }
     }
     private static String digest(String source) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8))); }

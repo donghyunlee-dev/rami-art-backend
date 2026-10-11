@@ -45,6 +45,9 @@ public class InquiryService {
     public Accepted submit(PublicSubmission raw, UUID key, RequestMetadata meta) {
         PublicSubmission command=normalize(raw);
         validateSubmission(command);
+        CourseRecord selectedCourse = command.interestedCourseId() == null ? null
+                : repository.findPublicCourseForSubmission(command.interestedCourseId())
+                        .orElseThrow(() -> new InquiryException("INQUIRY_INVALID"));
         if (!rateLimiter.consume(meta.ipAddress(),command.phone())) throw new InquiryException("INQUIRY_RATE_LIMITED");
         if (!command.company().isEmpty()) return new Accepted(true);
         String requestHash=digest(command.toString());
@@ -53,7 +56,8 @@ public class InquiryService {
         UUID id=UUID.randomUUID(); Instant now=clock.instant();
         repository.insert(id,protector.protect(command.name()),protector.hash("name:"+normalizeName(command.name())),
                 protector.protect(command.phone()),protector.hash("phone:"+command.phone()),last4(command.phone()),
-                command.interestedCourseId(),protector.protect(command.message()),command.consentPolicyVersion(),now);
+                command.interestedCourseId(),selectedCourse == null ? null : selectedCourse.name(),
+                protector.protect(command.message()),command.consentPolicyVersion(),now);
         recordAudit(meta,"MGT-INQUIRY-SUBMIT","ANONYMOUS",null,"INQUIRY_SUBMITTED",id,
                 Map.of("courseSelected",command.interestedCourseId()!=null));
         repository.complete("INQUIRY_PUBLIC_SUBMIT",key,id,202);
@@ -83,6 +87,12 @@ public class InquiryService {
     public List<CourseOption> courseOptions() {
         return repository.findCourseOptions().stream()
                 .map(course -> new CourseOption(course.id(),course.name(),course.active())).toList();
+    }
+
+    @Transactional(readOnly=true)
+    public List<PublicCourseOption> publicCourseOptions() {
+        return repository.findPublicCourseOptions().stream()
+                .map(course -> new PublicCourseOption(course.id(), course.name())).toList();
     }
 
     @Transactional(readOnly=true, isolation=Isolation.REPEATABLE_READ)
@@ -153,7 +163,6 @@ public class InquiryService {
             throw new InquiryException("INQUIRY_INVALID");
         if(!Boolean.TRUE.equals(v.privacyConsent()))throw new InquiryException("PRIVACY_CONSENT_REQUIRED");
         if(!currentPolicyVersion.equals(v.consentPolicyVersion()))throw new InquiryException("CONSENT_POLICY_VERSION_INVALID");
-        if(v.interestedCourseId()!=null&&!repository.activeCourseExists(v.interestedCourseId()))throw new InquiryException("INQUIRY_INVALID");
     }
     private InquiryQuery validateQuery(String keyword,List<UUID> courses,List<String> statuses,LocalDate from,LocalDate to,String readState,int page,int size,LocalDate today){
         String k=trim(keyword); List<UUID> c=courses==null?List.of():List.copyOf(courses); List<String> s=statuses==null||statuses.isEmpty()?List.of("RECEIVED","CONTACTING"):statuses.stream().map(String::toUpperCase).toList();

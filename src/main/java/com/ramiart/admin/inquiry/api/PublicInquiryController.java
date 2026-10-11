@@ -4,6 +4,7 @@ import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.inquiry.application.InquiryModels.Accepted;
 import com.ramiart.admin.inquiry.application.InquiryModels.PublicSubmission;
+import com.ramiart.admin.inquiry.application.InquiryModels.PublicCourseOption;
 import com.ramiart.admin.inquiry.application.InquiryService;
 import com.ramiart.admin.inquiry.application.InquiryService.RequestMetadata;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,6 +13,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,6 +24,12 @@ import org.springframework.web.bind.annotation.RestController;
 public final class PublicInquiryController {
     private final InquiryService service;
     public PublicInquiryController(InquiryService service){this.service=service;}
+
+    @GetMapping("/course-options")
+    ResponseEntity<ApiEnvelope<java.util.List<PublicCourseOption>>> courseOptions(HttpServletRequest request){
+        return ResponseEntity.ok().cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(60)).cachePublic())
+                .body(ApiEnvelope.success(service.publicCourseOptions(),RequestIdFilter.get(request)));
+    }
 
     @PostMapping
     ResponseEntity<ApiEnvelope<Accepted>> submit(@RequestHeader("Idempotency-Key") UUID key,
