@@ -12,6 +12,7 @@ import com.ramiart.admin.auth.application.AuthSessionService;
 import com.ramiart.admin.auth.application.AuthSessionService.IssuedSession;
 import com.ramiart.admin.auth.application.PasswordChangeService;
 import com.ramiart.admin.auth.application.PasswordVerifier;
+import com.ramiart.admin.auth.domain.SessionToken;
 import com.ramiart.admin.dev.PostgresScriptRunner;
 import com.ramiart.admin.datatransfer.application.DataTransferStorage;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
@@ -144,6 +145,25 @@ class AuthPersistenceIntegrationTest {
         var revoked = http("GET", "/api/admin/auth/sessions/current", cookie, null, null);
         assertThat(revoked.statusCode()).isEqualTo(401);
         assertThat(revoked.body()).contains("SESSION_REVOKED");
+    }
+
+    @Test
+    void idleExpiredSessionIsRejectedByTheCurrentSessionEndpoint() throws Exception {
+        IssuedSession issued = login("req_idle_expiry");
+        String cookie = "__Host-rami_admin_session=" + issued.rawToken();
+        jdbcTemplate.update("""
+                update admin_session
+                set issued_at = now() - interval '2 minutes',
+                    last_seen_at = now() - interval '2 minutes',
+                    idle_expires_at = now() - interval '1 second'
+                where token_hash = ?
+                """, SessionToken.sha256(issued.rawToken()));
+
+        var expired = http("GET", "/api/admin/auth/sessions/current", cookie, null, null);
+
+        assertThat(expired.statusCode()).isEqualTo(401);
+        assertThat(expired.body()).contains("SESSION_EXPIRED");
+        assertThat(expired.headers().firstValue("cache-control").orElse("")).contains("no-store");
     }
 
     private HttpResponse<String> http(String method, String path, String cookie, String origin, String body)
