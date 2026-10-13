@@ -41,6 +41,8 @@ class TuitionBillingRepositoryIntegrationTest {
     private UUID studentId;
     private UUID billingId;
     private UUID assignmentId;
+    private int disposableBillingSequence;
+    private record DisposableBilling(UUID billingId, UUID studentId, UUID assignmentId) {}
 
     @BeforeAll
     void applyCanonicalSchemaAndInsertDisposableBilling() throws Exception {
@@ -210,6 +212,131 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select status from financial_entry where source_id=?",String.class,paymentId)).isEqualTo("CANCELLED");
     }
 
+    @Test @DisplayName("MGT-TUITION-PAYMENT-RECORD-T006 concurrent full payments allow only one billing version")
+    void concurrentFullPaymentsSerializeOnBillingVersion() throws Exception {
+        DisposableBilling fixture=insertDisposableBilling();
+        UUID isolatedBillingId=fixture.billingId();
+        var paymentRepository=new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource));
+        var service=new TuitionPaymentService(paymentRepository,
+                new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),
+                java.time.Clock.systemUTC());
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE");
+        var metadata=new TuitionPaymentService.Metadata("payment-concurrency-it","127.0.0.1","test");
+        var start=new java.util.concurrent.CountDownLatch(1);
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var attempts=java.util.stream.IntStream.range(0,2).mapToObj(index->executor.submit(()->{
+                start.await();
+                var transactions=new org.springframework.transaction.support.TransactionTemplate(
+                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+                try {
+                    transactions.execute(status->service.create(isolatedBillingId,
+                            new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,0),
+                            UUID.randomUUID(),metadata,authentication));
+                    return "SUCCESS";
+                } catch (TuitionPaymentService.TuitionPaymentException failure) {
+                    return failure.code();
+                }
+            })).toList();
+            start.countDown();
+            var results=attempts.stream().map(future->{
+                try { return future.get(); }
+                catch (Exception failure) { throw new AssertionError(failure); }
+            }).toList();
+
+            assertThat(results).containsExactlyInAnyOrder("SUCCESS","BILLING_VERSION_CONFLICT");
+            assertThat(jdbc.queryForObject("select paid_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(1000L);
+            assertThat(jdbc.queryForObject("select count(*) from tuition_payment where billing_id=?",Integer.class,isolatedBillingId)).isOne();
+            assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_PAYMENT' and status='CONFIRMED' and source_id in (select id from tuition_payment where billing_id=?)",Integer.class,isolatedBillingId)).isOne();
+        } finally {
+            executor.shutdownNow();
+            removeDisposableBilling(fixture);
+        }
+    }
+
+    @Test @DisplayName("MGT-TUITION-PAYMENT-RECORD-T010 audit failure rolls back payment, ledger, and billing")
+    void paymentAuditFailureRollsBackAllRelatedRows() {
+        DisposableBilling fixture=insertDisposableBilling();
+        UUID isolatedBillingId=fixture.billingId();
+        var paymentRepository=new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource));
+        var service=new TuitionPaymentService(paymentRepository,event->{throw new IllegalStateException("audit unavailable");},
+                java.time.Clock.systemUTC());
+        var authentication=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE");
+        var transactions=new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        UUID key=UUID.randomUUID();
+
+        try {
+            assertThatThrownBy(()->transactions.execute(status->service.create(isolatedBillingId,
+                    new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,0),
+                    key,new TuitionPaymentService.Metadata("payment-rollback-it","127.0.0.1","test"),authentication)))
+                    .isInstanceOf(IllegalStateException.class).hasMessage("audit unavailable");
+
+            assertThat(jdbc.queryForObject("select paid_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from tuition_payment where billing_id=?",Integer.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_PAYMENT' and source_id in (select id from tuition_payment where billing_id=?)",Integer.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from idempotency_record where scope=? and idempotency_key=?",Integer.class,
+                    "MGT-TUITION-PAYMENT:"+actorId,key)).isZero();
+        } finally {
+            removeDisposableBilling(fixture);
+        }
+    }
+
+    private DisposableBilling insertDisposableBilling() {
+        return insertDisposableBilling(1000);
+    }
+
+    private DisposableBilling insertDisposableBilling(long amount) {
+        UUID isolatedId=UUID.randomUUID();
+        UUID isolatedStudentId=UUID.randomUUID();
+        UUID isolatedAssignmentId=UUID.randomUUID();
+        java.time.YearMonth month=java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul"))
+                .plusMonths(disposableBillingSequence+1L);
+        disposableBillingSequence++;
+        String uniqueName="납입 격리 원생 "+isolatedStudentId;
+        jdbc.update("insert into student(id,student_name,student_name_search,joined_at,status,created_by,updated_by) values(?,?,?,?,'ACTIVE',?,?)",
+                isolatedStudentId,uniqueName,uniqueName.replace(" ",""),month.atDay(1).minusYears(8),actorId,actorId);
+        UUID policyItemId=jdbc.queryForObject("select policy_item_id from tuition_billing where id=?",UUID.class,billingId);
+        jdbc.update("insert into student_tuition_assignment(id,student_id,policy_item_id,effective_from,created_by,updated_by) values(?,?,?,?,?,?)",
+                isolatedAssignmentId,isolatedStudentId,policyItemId,month.atDay(1),actorId,actorId);
+        jdbc.update("""
+                insert into tuition_billing(id,billing_batch_id,student_id,year_month,tuition_assignment_id,policy_item_id,
+                    billed_amount,adjustment_amount,paid_amount,refunded_amount,due_date,payment_status,issued_by,
+                    assignment_version,override_amount_snapshot,override_reason_snapshot,version)
+                select ?,billing_batch_id,?,?,?,policy_item_id,
+                    ?,0,0,0,?,'ISSUED',issued_by,0,null,null,0
+                from tuition_billing where id=?
+                """,isolatedId,isolatedStudentId,month.toString(),isolatedAssignmentId,amount,month.atDay(25),billingId);
+        return new DisposableBilling(isolatedId,isolatedStudentId,isolatedAssignmentId);
+    }
+
+    private void removeDisposableBilling(DisposableBilling fixture) {
+        jdbc.execute("alter table financial_entry disable trigger tr_financial_entry_source_guard");
+        jdbc.execute("alter table tuition_payment disable trigger tr_tuition_payment_source_guard");
+        jdbc.execute("alter table tuition_refund disable trigger tr_tuition_refund_source_guard");
+        jdbc.execute("alter table billing_adjustment disable trigger tr_billing_adjustment_source_guard");
+        jdbc.execute("alter table tuition_billing disable trigger tr_tuition_billing_snapshot_guard");
+        try {
+            List<UUID> refundEntries=jdbc.query("select financial_entry_id from tuition_refund where billing_id=?",(row,index)->row.getObject(1,UUID.class),fixture.billingId());
+            jdbc.update("delete from idempotency_record where resource_id in (select id from tuition_payment where billing_id=?) or resource_id in (select id from tuition_refund where billing_id=?) or resource_id in (select id from billing_adjustment where billing_id=?)",fixture.billingId(),fixture.billingId(),fixture.billingId());
+            jdbc.update("delete from tuition_refund where billing_id=?",fixture.billingId());
+            jdbc.update("delete from billing_adjustment where billing_id=?",fixture.billingId());
+            jdbc.update("delete from financial_entry where source_type='TUITION_PAYMENT' and source_id in (select id from tuition_payment where billing_id=?)",fixture.billingId());
+            jdbc.update("delete from tuition_payment where billing_id=?",fixture.billingId());
+            refundEntries.forEach(entryId->jdbc.update("delete from financial_entry where id=?",entryId));
+            jdbc.update("delete from tuition_billing where id=?",fixture.billingId());
+            jdbc.update("delete from student_tuition_assignment where id=?",fixture.assignmentId());
+            jdbc.update("delete from student where id=?",fixture.studentId());
+        } finally {
+            jdbc.execute("alter table financial_entry enable trigger tr_financial_entry_source_guard");
+            jdbc.execute("alter table tuition_payment enable trigger tr_tuition_payment_source_guard");
+            jdbc.execute("alter table tuition_refund enable trigger tr_tuition_refund_source_guard");
+            jdbc.execute("alter table billing_adjustment enable trigger tr_billing_adjustment_source_guard");
+            jdbc.execute("alter table tuition_billing enable trigger tr_tuition_billing_snapshot_guard");
+        }
+    }
+
     @Test @DisplayName("MGT-TUITION-POLICY creates, saves, publishes, and replays an isolated policy revision")
     void tuitionPolicyDraftAndPublicationAreAtomicAndIdempotent() {
         var policies=new JdbcTuitionPolicyRepository(JdbcClient.create(dataSource));
@@ -296,6 +423,224 @@ class TuitionBillingRepositoryIntegrationTest {
         assertThat(jdbc.queryForObject("select status from billing_adjustment where id=?",String.class,adjustmentId)).isEqualTo("CANCELLED");
     }
 
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT-T001 reconciles a linked partial refund from source rows and cash date")
+    void fullPaymentDiscountAndLinkedPartialRefundReconcileIndependently() {
+        DisposableBilling fixture=insertDisposableBilling(180000);
+        UUID isolatedBillingId=fixture.billingId();
+        try {
+            var transactions=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+            var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE","TUITION_ADJUSTMENT_READ","TUITION_ADJUSTMENT_WRITE","TUITION_REFUND_WRITE");
+            var metadata=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("adjustment-reconcile-it","127.0.0.1","integration-test");
+            var paymentService=new TuitionPaymentService(new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            var paymentResult=transactions.execute(status->paymentService.create(isolatedBillingId,
+                    new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),180000,"TRANSFER",null,0),
+                    UUID.randomUUID(),new TuitionPaymentService.Metadata("adjustment-payment-it","127.0.0.1","integration-test"),auth));
+            UUID paymentId=(UUID)((Map<?,?>)paymentResult.get("payment")).get("paymentId");
+            var service=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(
+                    new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            UUID adjustmentKey=UUID.randomUUID();
+            var adjustment=transactions.execute(status->service.adjust(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("DISCOUNT",-20000,"10월 수업료 할인",1),
+                    adjustmentKey,metadata,auth));
+            UUID adjustmentId=(UUID)((Map<?,?>)((List<?>)adjustment.get("adjustments")).getFirst()).get("adjustmentId");
+            UUID refundKey=UUID.randomUUID();
+            var refundRequest=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(10000,
+                    LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),"TRANSFER",paymentId,0L,"할인 후 일부 환불",2);
+            var refunded=transactions.execute(status->service.refund(isolatedBillingId,refundRequest,refundKey,metadata,auth));
+            Map<?,?> summary=(Map<?,?>)refunded.get("billing");
+            assertThat(summary.get("baseAmount")).isEqualTo(180000L);
+            assertThat(summary.get("confirmedAdjustmentAmount")).isEqualTo(-20000L);
+            assertThat(summary.get("chargeAmount")).isEqualTo(160000L);
+            assertThat(summary.get("confirmedPaymentAmount")).isEqualTo(180000L);
+            assertThat(summary.get("confirmedRefundAmount")).isEqualTo(10000L);
+            assertThat(summary.get("netPaidAmount")).isEqualTo(170000L);
+            assertThat(summary.get("balance")).isEqualTo(-10000L);
+            assertThat(summary.get("refundableAmount")).isEqualTo(10000L);
+            UUID refundId=(UUID)((Map<?,?>)((List<?>)refunded.get("refunds")).getFirst()).get("refundId");
+            UUID refundEntryId=jdbc.queryForObject("select financial_entry_id from tuition_refund where id=?",UUID.class,refundId);
+            assertThat(jdbc.queryForObject("select payment_id from tuition_refund where id=?",UUID.class,refundId)).isEqualTo(paymentId);
+
+            Map<String,Object> sourceTotals=jdbc.queryForMap("""
+                    select b.billed_amount base_amount,b.adjustment_amount,
+                        coalesce(p.amount,0)::bigint confirmed_payment_amount,coalesce(r.amount,0)::bigint confirmed_refund_amount,
+                        (b.billed_amount+b.adjustment_amount)::bigint charge_amount,
+                        (coalesce(p.amount,0)-coalesce(r.amount,0))::bigint net_paid_amount,
+                        (b.billed_amount+b.adjustment_amount-coalesce(p.amount,0)+coalesce(r.amount,0))::bigint balance
+                    from tuition_billing b
+                    left join lateral (select sum(amount) amount from tuition_payment where billing_id=b.id and status='CONFIRMED') p on true
+                    left join lateral (select sum(amount) amount from tuition_refund where billing_id=b.id and status='CONFIRMED') r on true
+                    where b.id=?
+                    """,isolatedBillingId);
+            assertThat(((Number)sourceTotals.get("base_amount")).longValue()).isEqualTo(180000L);
+            assertThat(((Number)sourceTotals.get("adjustment_amount")).longValue()).isEqualTo(-20000L);
+            assertThat(((Number)sourceTotals.get("confirmed_payment_amount")).longValue()).isEqualTo(180000L);
+            assertThat(((Number)sourceTotals.get("confirmed_refund_amount")).longValue()).isEqualTo(10000L);
+            assertThat(((Number)sourceTotals.get("charge_amount")).longValue()).isEqualTo(160000L);
+            assertThat(((Number)sourceTotals.get("net_paid_amount")).longValue()).isEqualTo(170000L);
+            assertThat(((Number)sourceTotals.get("balance")).longValue()).isEqualTo(-10000L);
+            assertThat(jdbc.queryForMap("select type,status,amount,transaction_date from financial_entry where id=?",refundEntryId))
+                    .containsEntry("type","EXPENSE").containsEntry("status","CONFIRMED");
+            assertThat(((Number)jdbc.queryForMap("select amount from financial_entry where id=?",refundEntryId).get("amount")).longValue()).isEqualTo(10000L);
+            Map<String,Object> cashTotals=jdbc.queryForMap("""
+                    select coalesce(sum(amount) filter(where type='INCOME'),0)::bigint income,
+                           coalesce(sum(amount) filter(where type='EXPENSE'),0)::bigint expense
+                    from financial_entry where status='CONFIRMED' and transaction_date=?
+                      and source_type in ('TUITION_PAYMENT','TUITION_REFUND') and source_id in (?,?)
+                    """,LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),paymentId,refundId);
+            assertThat(cashTotals).containsEntry("income",180000L).containsEntry("expense",10000L);
+
+            var replay=transactions.execute(status->service.refund(isolatedBillingId,refundRequest,refundKey,metadata,auth));
+            assertThat(((List<?>)replay.get("refunds"))).hasSize(1);
+            assertThatThrownBy(()->transactions.execute(status->service.refund(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(9000,refundRequest.refundedOn(),"TRANSFER",paymentId,0L,"할인 후 일부 환불",2),
+                    refundKey,metadata,auth)))
+                    .isInstanceOf(com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository.TuitionAdjustmentException.class)
+                    .extracting("code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
+
+            long versionAfterRefund=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            transactions.executeWithoutResult(status->service.cancelRefund(refundId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.CancelRequest("환불 정산 취소",0,versionAfterRefund),
+                    UUID.randomUUID(),metadata,auth));
+            long versionBeforeAdjustmentCancel=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            transactions.executeWithoutResult(status->service.cancelAdjustment(adjustmentId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.CancelRequest("할인 정정 취소",0,versionBeforeAdjustmentCancel),
+                    UUID.randomUUID(),metadata,auth));
+            assertThat(jdbc.queryForObject("select status from financial_entry where id=?",String.class,refundEntryId)).isEqualTo("CANCELLED");
+            assertThat(jdbc.queryForObject("select status from billing_adjustment where id=?",String.class,adjustmentId)).isEqualTo("CANCELLED");
+            assertThat(jdbc.queryForObject("select paid_amount-refunded_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(180000L);
+        } finally {
+            removeDisposableBilling(fixture);
+        }
+    }
+
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT unallocated refund prevents a payment cancellation that would make net paid negative")
+    void paymentCancellationAfterUnallocatedRefundPreservesNonnegativeNetPaid() {
+        DisposableBilling fixture=insertDisposableBilling();
+        UUID isolatedBillingId=fixture.billingId();
+        try {
+            var transactions=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+            var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE","TUITION_ADJUSTMENT_READ","TUITION_ADJUSTMENT_WRITE","TUITION_REFUND_WRITE");
+            var paymentService=new TuitionPaymentService(new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            var created=transactions.execute(status->paymentService.create(isolatedBillingId,
+                    new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,0),
+                    UUID.randomUUID(),new TuitionPaymentService.Metadata("unallocated-refund-payment-it","127.0.0.1","integration-test"),auth));
+            Map<?,?> payment=(Map<?,?>)created.get("payment");
+            UUID paymentId=(UUID)payment.get("paymentId");
+            var adjustmentService=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(
+                    new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            long adjustmentBillingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            transactions.execute(status->adjustmentService.adjust(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("DISCOUNT",-500,"조정 통합 사유",adjustmentBillingVersion),
+                    UUID.randomUUID(),new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("unallocated-refund-adjustment-it","127.0.0.1","integration-test"),auth));
+            long refundBillingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            transactions.execute(status->adjustmentService.refund(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(100,LocalDate.now(),"CASH",null,null,"청구 단위 미연결 환불",refundBillingVersion),
+                    UUID.randomUUID(),new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("unallocated-refund-it","127.0.0.1","integration-test"),auth));
+            long versionAfterRefund=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+
+            assertThatThrownBy(()->transactions.execute(status->paymentService.cancel(paymentId,
+                    new TuitionPaymentService.CancelRequest("납입 정정 취소",0,versionAfterRefund),UUID.randomUUID(),
+                    new TuitionPaymentService.Metadata("unallocated-refund-payment-cancel-it","127.0.0.1","integration-test"),auth)))
+                    .isInstanceOf(TuitionPaymentService.TuitionPaymentException.class)
+                    .extracting("code").isEqualTo("TUITION_PAYMENT_HAS_REFUND");
+            assertThat(jdbc.queryForObject("select paid_amount-refunded_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(900L);
+            assertThat(jdbc.queryForObject("select status from tuition_payment where id=?",String.class,paymentId)).isEqualTo("CONFIRMED");
+        } finally {
+            removeDisposableBilling(fixture);
+        }
+    }
+
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT-T008 adjustment and refund audit failures roll back every source and aggregate")
+    void adjustmentAndRefundAuditFailuresRollbackBillingAndLedger() {
+        DisposableBilling fixture=insertDisposableBilling();
+        UUID isolatedBillingId=fixture.billingId();
+        try {
+            var transactions=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+            var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE","TUITION_ADJUSTMENT_READ","TUITION_ADJUSTMENT_WRITE","TUITION_REFUND_WRITE");
+            var paymentService=new TuitionPaymentService(new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            transactions.execute(status->paymentService.create(isolatedBillingId,
+                    new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,0),
+                    UUID.randomUUID(),new TuitionPaymentService.Metadata("adjustment-rollback-payment-it","127.0.0.1","integration-test"),auth));
+            var repository=new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource));
+            var failingAuditService=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(repository,
+                    event->{throw new IllegalStateException("audit unavailable");},java.time.Clock.systemUTC());
+            var metadata=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("adjustment-rollback-it","127.0.0.1","integration-test");
+            long originalVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            assertThatThrownBy(()->transactions.execute(status->failingAuditService.adjust(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("DISCOUNT",-500,"조정 실패 복구",originalVersion),
+                    UUID.randomUUID(),metadata,auth))).isInstanceOf(IllegalStateException.class).hasMessage("audit unavailable");
+            assertThat(jdbc.queryForObject("select adjustment_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(originalVersion);
+            assertThat(jdbc.queryForObject("select count(*) from billing_adjustment where billing_id=?",Integer.class,isolatedBillingId)).isZero();
+
+            var workingAuditService=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(repository,
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            transactions.execute(status->workingAuditService.adjust(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("DISCOUNT",-500,"조정으로 credit",originalVersion),
+                    UUID.randomUUID(),metadata,auth));
+            long creditVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            Integer ledgerCountBefore=jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_REFUND'",Integer.class);
+            assertThatThrownBy(()->transactions.execute(status->failingAuditService.refund(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(100,LocalDate.now(),"CASH",null,null,"환불 실패 복구",creditVersion),
+                    UUID.randomUUID(),metadata,auth))).isInstanceOf(IllegalStateException.class).hasMessage("audit unavailable");
+            assertThat(jdbc.queryForObject("select adjustment_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(-500L);
+            assertThat(jdbc.queryForObject("select refunded_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(creditVersion);
+            assertThat(jdbc.queryForObject("select count(*) from tuition_refund where billing_id=?",Integer.class,isolatedBillingId)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_REFUND'",Integer.class)).isEqualTo(ledgerCountBefore);
+        } finally {
+            removeDisposableBilling(fixture);
+        }
+    }
+
+    @Test @DisplayName("MGT-TUITION-ADJUSTMENT-T007 concurrent last-credit refunds cannot exceed the source credit")
+    void concurrentRefundsSerializeOnBillingVersion() throws Exception {
+        DisposableBilling fixture=insertDisposableBilling();
+        UUID isolatedBillingId=fixture.billingId();
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var transactions=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+            var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_READ","TUITION_PAYMENT_WRITE","TUITION_ADJUSTMENT_READ","TUITION_ADJUSTMENT_WRITE","TUITION_REFUND_WRITE");
+            var paymentService=new TuitionPaymentService(new JdbcTuitionPaymentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            transactions.execute(status->paymentService.create(isolatedBillingId,
+                    new TuitionPaymentService.CreateRequest(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),1000,"CASH",null,0),
+                    UUID.randomUUID(),new TuitionPaymentService.Metadata("refund-race-payment-it","127.0.0.1","integration-test"),auth));
+            var service=new com.ramiart.admin.tuition.application.TuitionAdjustmentService(
+                    new com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository(JdbcClient.create(dataSource)),
+                    new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper()),java.time.Clock.systemUTC());
+            transactions.execute(status->service.adjust(isolatedBillingId,
+                    new com.ramiart.admin.tuition.application.TuitionAdjustmentService.AdjustmentRequest("DISCOUNT",-500,"경쟁 환불 credit",1),
+                    UUID.randomUUID(),new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("refund-race-adjustment-it","127.0.0.1","integration-test"),auth));
+            var start=new java.util.concurrent.CountDownLatch(1);
+            long billingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,isolatedBillingId);
+            var attempts=java.util.stream.IntStream.range(0,2).mapToObj(index->executor.submit(()->{
+                start.await();
+                var request=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.RefundRequest(500,
+                        LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),"CASH",null,null,"credit 동시 환불",billingVersion);
+                var metadata=new com.ramiart.admin.tuition.application.TuitionAdjustmentService.Metadata("refund-race-"+index,"127.0.0.1","integration-test");
+                var tx=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+                try { tx.execute(status->service.refund(isolatedBillingId,request,UUID.randomUUID(),metadata,auth)); return "SUCCESS"; }
+                catch (com.ramiart.admin.tuition.infrastructure.JdbcTuitionAdjustmentRepository.TuitionAdjustmentException failure) { return failure.code(); }
+            })).toList();
+            start.countDown();
+            var outcomes=attempts.stream().map(future->{try{return future.get();}catch(Exception failure){throw new AssertionError(failure);}}).toList();
+
+            assertThat(outcomes).containsExactlyInAnyOrder("SUCCESS","TUITION_ADJUSTMENT_VERSION_CONFLICT");
+            assertThat(jdbc.queryForObject("select refunded_amount from tuition_billing where id=?",Long.class,isolatedBillingId)).isEqualTo(500L);
+            assertThat(jdbc.queryForObject("select count(*) from tuition_refund where billing_id=? and status='CONFIRMED'",Integer.class,isolatedBillingId)).isOne();
+            assertThat(jdbc.queryForObject("select count(*) from financial_entry where source_type='TUITION_REFUND' and status='CONFIRMED' and source_id in (select id from tuition_refund where billing_id=?)",Integer.class,isolatedBillingId)).isOne();
+        } finally {
+            executor.shutdownNow();
+            removeDisposableBilling(fixture);
+        }
+    }
+
     @Test @DisplayName("MGT-TUITION-RECEIPT issue, reissue, hash validation, and payment cancellation preserve versions")
     void receiptVersionsUsePaymentSnapshotsAndVoidOnPaymentCancellation() {
         var objectStorage=new java.util.concurrent.ConcurrentHashMap<String,byte[]>();
@@ -351,6 +696,85 @@ class TuitionBillingRepositoryIntegrationTest {
         paymentTx.executeWithoutResult(status->paymentService.cancel(paymentId,new TuitionPaymentService.CancelRequest("통합시험 납입 취소",0,currentBillingVersion),
                 UUID.randomUUID(),new TuitionPaymentService.Metadata("receipt-payment-cancel-it","127.0.0.1","integration-test"),auth));
         assertThat(jdbc.queryForObject("select status from tuition_receipt where id=?",String.class,receiptId)).isEqualTo("VOID");
+        String secondKey=jdbc.queryForObject("select storage_key from tuition_receipt_version where receipt_id=? and version=2",String.class,receiptId);
+        byte[] secondPdf=objectStorage.get(secondKey).clone();
+        var cancelledVersion=service.reissue(receiptId,new com.ramiart.admin.tuition.application.TuitionReceiptService.ReissueRequest(2,"납입 취소 증빙 반영"),
+                UUID.randomUUID(),metadata,new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE"));
+        assertThat(cancelledVersion).containsEntry("status","VOID").containsEntry("currentVersion",3);
+        assertThat((List<?>)cancelledVersion.get("versions")).hasSize(3);
+        assertThat(jdbc.queryForObject("select snapshot->>'paymentStatus' from tuition_receipt_version where receipt_id=? and version=3",String.class,receiptId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("select (snapshot->>'netPaidAmount')::bigint from tuition_receipt_version where receipt_id=? and version=3",Long.class,receiptId)).isZero();
+        assertThat(jdbc.queryForObject("select storage_key from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId)).isEqualTo(firstKey);
+        assertThat(objectStorage.get(firstKey)).containsExactly(originalPdf);
+        assertThat(objectStorage.get(secondKey)).containsExactly(secondPdf);
+        String cancelledKey=jdbc.queryForObject("select storage_key from tuition_receipt_version where receipt_id=? and version=3",String.class,receiptId);
+        assertThat(objectStorage.get(cancelledKey)).startsWith("%PDF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    }
+
+    @Test @DisplayName("MGT-TUITION-RECEIPT upload interruption preserves idempotency and recovers in a new version")
+    void receiptUploadFailurePreservesHistoryAndCanBeReissued() {
+        DisposableBilling fixture=insertDisposableBilling();
+        var objectStorage=new java.util.concurrent.ConcurrentHashMap<String,byte[]>();
+        var storage=new com.ramiart.admin.tuition.application.TuitionReceiptStorage(){
+            private boolean interruptAfterUpload=true;
+            public void upload(String key,byte[] pdf){objectStorage.put(key,pdf.clone());if(interruptAfterUpload){interruptAfterUpload=false;throw new IllegalStateException("synthetic response interruption");}}
+            public byte[] download(String key){return objectStorage.get(key).clone();}
+            public String signedUrl(String key,int seconds){return "https://storage.test/"+key;}
+            public void delete(String key){objectStorage.remove(key);}
+        };
+        try {
+            var receiptMapper=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+            var receipts=new JdbcTuitionReceiptRepository(JdbcClient.create(dataSource),receiptMapper);
+            var audit=new JdbcAuditRecorder(JdbcClient.create(dataSource),new com.fasterxml.jackson.databind.ObjectMapper());
+            var txManager=new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);
+            var paymentService=new TuitionPaymentService(new com.ramiart.admin.tuition.infrastructure.JdbcTuitionPaymentRepository(JdbcClient.create(dataSource)),audit,java.time.Clock.systemUTC());
+            var receiptService=new com.ramiart.admin.tuition.application.TuitionReceiptService(receipts,storage,
+                    new com.ramiart.admin.tuition.infrastructure.TuitionReceiptPdfGenerator(),audit,java.time.Clock.systemUTC(),txManager);
+            var auth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_PAYMENT_WRITE","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE");
+            var paymentTx=new org.springframework.transaction.support.TransactionTemplate(txManager);
+            long billingVersion=jdbc.queryForObject("select version from tuition_billing where id=?",Long.class,fixture.billingId());
+            var created=paymentTx.execute(status->paymentService.create(fixture.billingId(),new TuitionPaymentService.CreateRequest(LocalDate.now(),1000,"CASH",null,billingVersion),
+                    UUID.randomUUID(),new TuitionPaymentService.Metadata("receipt-interrupted-payment","127.0.0.1","integration-test"),auth));
+            UUID paymentId=(UUID)((Map<?,?>)created.get("payment")).get("paymentId");
+            var issueRequest=new com.ramiart.admin.tuition.application.TuitionReceiptService.IssueRequest(0L,billingVersion+1);
+            UUID issueKey=UUID.randomUUID();
+            var metadata=new com.ramiart.admin.tuition.application.TuitionReceiptService.Metadata("receipt-interrupted","127.0.0.1","integration-test");
+            var issueAuth=new TestingAuthenticationToken(actorId.toString(),"","TUITION_RECEIPT_READ","TUITION_RECEIPT_ISSUE");
+
+            assertThatThrownBy(()->receiptService.issue(paymentId,issueRequest,issueKey,metadata,issueAuth))
+                    .isInstanceOf(JdbcTuitionReceiptRepository.TuitionReceiptException.class)
+                    .extracting("code").isEqualTo("RECEIPT_GENERATION_FAILED");
+
+            UUID receiptId=jdbc.queryForObject("select id from tuition_receipt where payment_id=?",UUID.class,paymentId);
+            String receiptNumber=jdbc.queryForObject("select receipt_number from tuition_receipt where id=?",String.class,receiptId);
+            String originalSnapshot=jdbc.queryForObject("select snapshot::text from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId);
+            String failedKey="tuition-receipts/"+receiptNumber.substring(2,8)+"/"+receiptId+"-v1.pdf";
+            assertThat(jdbc.queryForObject("select status from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId)).isEqualTo("FAILED");
+            assertThat(objectStorage).doesNotContainKey(failedKey);
+            var replay=receiptService.issue(paymentId,issueRequest,issueKey,metadata,issueAuth);
+            assertThat(replay).containsEntry("receiptNumber",receiptNumber).containsEntry("currentVersion",1);
+            assertThat(jdbc.queryForObject("select count(*) from tuition_receipt_version where receipt_id=?",Integer.class,receiptId)).isOne();
+
+            var reissued=receiptService.reissue(receiptId,new com.ramiart.admin.tuition.application.TuitionReceiptService.ReissueRequest(1,"합성 장애 후 복구 발행"),
+                    UUID.randomUUID(),metadata,issueAuth);
+            assertThat(reissued).containsEntry("receiptNumber",receiptNumber).containsEntry("currentVersion",2);
+            assertThat(jdbc.queryForObject("select count(*) from tuition_receipt_version where receipt_id=?",Integer.class,receiptId)).isEqualTo(2);
+            assertThat(jdbc.queryForObject("select snapshot::text from tuition_receipt_version where receipt_id=? and version=1",String.class,receiptId)).isEqualTo(originalSnapshot);
+            assertThat(jdbc.queryForObject("select status from tuition_receipt_version where receipt_id=? and version=2",String.class,receiptId)).isEqualTo("READY");
+            String readyKey=jdbc.queryForObject("select storage_key from tuition_receipt_version where receipt_id=? and version=2",String.class,receiptId);
+            String storedHash=jdbc.queryForObject("select sha256 from tuition_receipt_version where receipt_id=? and version=2",String.class,receiptId);
+            byte[] readyPdf=objectStorage.get(readyKey);
+            assertThat(readyPdf).startsWith("%PDF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            assertThat(storedHash).isEqualTo(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(readyPdf)));
+        } catch(java.security.NoSuchAlgorithmException exception) {
+            throw new AssertionError(exception);
+        } finally {
+            UUID payment=jdbc.queryForObject("select id from tuition_payment where billing_id=?",UUID.class,fixture.billingId());
+            jdbc.update("delete from idempotency_record where resource_id in (select id from tuition_receipt where payment_id=?)",payment);
+            jdbc.update("delete from tuition_receipt_version where receipt_id in (select id from tuition_receipt where payment_id=?)",payment);
+            jdbc.update("delete from tuition_receipt where payment_id=?",payment);
+            removeDisposableBilling(fixture);
+        }
     }
 
     @Test @DisplayName("MGT-TUITION-BILLING-GENERATE-T005/T009/T010 batch issuance and idempotent replay")

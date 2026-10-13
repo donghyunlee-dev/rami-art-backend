@@ -53,14 +53,17 @@ public class JdbcDashboardRepository implements DashboardRepository {
     @Override
     public InquiryMetrics inquiries(LocalDate today, java.time.ZoneId studioZone) {
         LocalDateTime start = today.minusDays(90).atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
         LocalDateTime staleBefore = today.minusDays(3).atStartOfDay();
         return jdbc.sql("""
                 select count(*) filter (where i.read_at is null)::int unread_count,
                        count(*)::int unanswered_count,
                        count(*) filter (where i.received_at < :stale_before)::int stale_count
                   from inquiry i
-                 where i.status in ('RECEIVED','CONTACTING') and i.received_at >= :range_start
+                 where i.status in ('RECEIVED','CONTACTING')
+                   and i.received_at >= :range_start and i.received_at < :range_end
                 """).param("range_start", start.atZone(studioZone).toOffsetDateTime())
+                .param("range_end", end.atZone(studioZone).toOffsetDateTime())
                 .param("stale_before", staleBefore.atZone(studioZone).toOffsetDateTime())
                 .query((row, index) -> new InquiryMetrics(row.getInt("unread_count"),
                         row.getInt("unanswered_count"), row.getInt("stale_count"))).single();

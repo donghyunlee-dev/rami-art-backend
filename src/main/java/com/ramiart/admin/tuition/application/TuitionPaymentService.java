@@ -79,7 +79,9 @@ public class TuitionPaymentService {
         if(payment.version()!=request.paymentVersion()) throw new TuitionPaymentException("PAYMENT_VERSION_CONFLICT");
         if(billing.version()!=request.billingVersion()) throw new TuitionPaymentException("BILLING_VERSION_CONFLICT");
         if(!"CONFIRMED".equals(payment.status())) throw new TuitionPaymentException("PAYMENT_ALREADY_CANCELLED");
-        long paid=billing.paidAmount()-payment.amount(); long balance=billing.billedAmount()+billing.adjustmentAmount()-paid+billing.refundedAmount();
+        long paid=billing.paidAmount()-payment.amount();
+        if(paid<billing.refundedAmount()) throw new TuitionPaymentException("TUITION_PAYMENT_HAS_REFUND");
+        long balance=billing.billedAmount()+billing.adjustmentAmount()-paid+billing.refundedAmount();
         String state=balance<0?"CREDIT":balance==0?"PAID":paid==0?"ISSUED":"PARTIALLY_PAID";
         UUID entryId=payment.entryId()!=null?payment.entryId():repository.findEntry(paymentId).orElseThrow(()->new TuitionPaymentException("PAYMENT_SAVE_FAILED"));
         repository.cancel(paymentId,entryId,actor,reason,paid,state,request.paymentVersion(),request.billingVersion());

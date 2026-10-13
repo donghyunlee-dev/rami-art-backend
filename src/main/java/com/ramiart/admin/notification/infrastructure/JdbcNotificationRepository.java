@@ -75,8 +75,24 @@ public class JdbcNotificationRepository implements NotificationRepository {
         return Optional.of(new StoredMessageDetail(row.message(),row.subject(),row.body(),row.recipientLast4(),row.attemptCount(),row.lastErrorCode(),attempts));
     }
     @Override public boolean cancel(UUID id,long version,String reason,UUID actor){return jdbc.update("update notification_message set status='CANCELLED',cancelled_at=statement_timestamp(),cancelled_by=:actor,cancel_reason=:reason,version=version+1 where id=:id and version=:version and status='QUEUED'",Map.of("id",id,"version",version,"reason",reason,"actor",actor))==1;}
-    @Override public boolean retry(UUID id){return jdbc.update("update notification_message set status='QUEUED',last_error_code=null,next_attempt_at=null,version=version+1 where id=:id and status='FAILED' and attempt_count<5 and coalesce(last_error_code,'') not like 'PERMANENT_%'",Map.of("id",id))==1;}
+    @Override public boolean retry(UUID id){return jdbc.update("update notification_message set status='QUEUED',last_error_code=null,next_attempt_at=null,version=version+1 where id=:id and status='FAILED' and attempt_count<5 and coalesce(last_error_code,'') not like 'PERMANENT_%' and not(channel='EMAIL' and last_attempt_at<=statement_timestamp()-interval '24 hours')",Map.of("id",id))==1;}
     @Override @Transactional public Optional<Dispatch> claimNext(String channel,OffsetDateTime now){
+        jdbc.update("""
+                with interrupted as (
+                    update notification_message
+                       set status='FAILED',
+                           last_error_code=case when attempt_count<5 and last_attempt_at>:now-interval '24 hours' then 'WORKER_INTERRUPTED' else 'PERMANENT_WORKER_INTERRUPTED' end,
+                           next_attempt_at=case when attempt_count<5 and last_attempt_at>:now-interval '24 hours' then :now else null end,
+                           version=version+1
+                     where channel=:channel and status='SENDING' and last_attempt_at<=:now-interval '2 minutes'
+                     returning id,attempt_count,last_attempt_at,last_error_code
+                )
+                insert into notification_attempt(id,notification_message_id,attempt_number,result,error_code,started_at,completed_at)
+                select gen_random_uuid(),id,attempt_count,
+                       case when last_error_code='WORKER_INTERRUPTED' then 'TRANSIENT_FAILURE' else 'PERMANENT_FAILURE' end,
+                       last_error_code,last_attempt_at,:now
+                  from interrupted
+                """,new MapSqlParameterSource().addValue("channel",channel).addValue("now",now));
         jdbc.update("update notification_message m set status='CANCELLED',cancelled_at=:now,cancel_reason='선택 동의가 유효하지 않아 발송을 취소했습니다.',version=version+1 where m.status='QUEUED' and m.optional_notice and (m.consent_id is null or not exists(select 1 from student_consent c join consent_policy p on p.id=c.consent_policy_id where c.id=m.consent_id and c.status='ACTIVE' and p.status='PUBLISHED' and c.guardian_contact_id=m.guardian_contact_id and (c.expires_on is null or c.expires_on >= (:now at time zone 'Asia/Seoul')::date)))",Map.of("now",now));
         List<Dispatch> candidates=jdbc.query("select id,attempt_count,channel,recipient_ciphertext,subject_ciphertext,body_ciphertext,consent_id,optional_notice,last_attempt_at from notification_message where channel=:channel and ((status='QUEUED' and scheduled_at<=:now) or (status='FAILED' and next_attempt_at<=:now and attempt_count<5 and coalesce(last_error_code,'') not like 'PERMANENT_%')) and (not optional_notice or exists(select 1 from student_consent c join consent_policy p on p.id=c.consent_policy_id where c.id=consent_id and c.status='ACTIVE' and p.status='PUBLISHED' and c.guardian_contact_id=notification_message.guardian_contact_id and (c.expires_on is null or c.expires_on >= (:now at time zone 'Asia/Seoul')::date))) order by scheduled_at,id for update skip locked limit 1",new MapSqlParameterSource().addValue("channel",channel).addValue("now",now),(r,n)->new Dispatch(r.getObject("id",UUID.class),r.getInt("attempt_count")+1,r.getString("channel"),r.getBytes("recipient_ciphertext"),r.getBytes("subject_ciphertext"),r.getBytes("body_ciphertext"),r.getObject("consent_id",UUID.class),r.getBoolean("optional_notice"),now));
         if(candidates.isEmpty())return Optional.empty();Dispatch found=candidates.getFirst();jdbc.update("update notification_message set status='SENDING',attempt_count=:attempt,last_attempt_at=:now,next_attempt_at=null,version=version+1 where id=:id",Map.of("attempt",found.attemptNumber(),"now",now,"id",found.id()));return Optional.of(found);

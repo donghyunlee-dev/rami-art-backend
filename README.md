@@ -10,7 +10,7 @@ the existing public API and the administrator API from one Render service.
 
 ## Requirements
 
-- Java 21
+- Java 25
 - Gradle (or use `./gradlew`)
 
 ## Run

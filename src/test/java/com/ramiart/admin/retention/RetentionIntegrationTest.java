@@ -82,6 +82,9 @@ class RetentionIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from inquiry where id=?",Integer.class,eligible)).isZero();
         assertThat(service.execute(request,key,"session",owner,meta()).id()).isEqualTo(queued.id());
         verify(reauth,times(1)).consume("reauth-token","session","RETENTION_EXECUTION",owner);
+        assertThat(jdbc.queryForObject("select count(*) from audit_log where actor_id=? and target_type='RETENTION_RUN' and target_id=? and action in ('RETENTION_RUN_APPROVED','RETENTION_RUN_FINISHED')",Integer.class,UUID.fromString(owner.getName()),queued.id())).isEqualTo(2);
+        String auditDetails=String.join(" ",jdbc.queryForList("select details::text from audit_log where target_type='RETENTION_RUN' and target_id=?",String.class,queued.id()));
+        assertThat(auditDetails).contains("INQUIRY","candidateCount").doesNotContain(held.toString(),eligible.toString());
     }
     @Test void MGT_RETENTION_preview_drift_and_expiry_block_execution(){
         UUID id=inquiry();Preview p=service.preview(new PreviewWrite("INQUIRY",NOW),owner);

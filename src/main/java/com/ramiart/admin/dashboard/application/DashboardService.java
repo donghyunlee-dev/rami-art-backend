@@ -76,13 +76,15 @@ public class DashboardService {
         if (has(authentication, "INQUIRY_READ")) add(widgets, failureCodes, "inquiries", "DASHBOARD_INQUIRIES_UNAVAILABLE", requestId, () -> {
             var metrics = repository.inquiries(today, studioZone);
             return Map.of("unreadCount", metrics.unreadCount(), "unansweredCount", metrics.unansweredCount(),
-                    "staleCount", metrics.staleCount(), "targetUrl", "/admin/inquiries?statuses=RECEIVED,CONTACTING");
+                    "staleCount", metrics.staleCount(), "targetUrl", "/admin/inquiries?statuses=RECEIVED,CONTACTING&from="
+                            + today.minusDays(90) + "&to=" + today);
         });
         if (has(authentication, "STUDENT_READ")) add(widgets, failureCodes, "birthdays", "DASHBOARD_BIRTHDAYS_UNAVAILABLE", requestId, () -> {
             LocalDate rangeEnd = today.plusDays(6);
             List<Map<String, Object>> items = repository.birthdays(today, rangeEnd, 7).stream().map(this::birthdayView).toList();
             return Map.of("rangeEnd", rangeEnd, "items", items,
-                    "targetUrl", "/admin/students?birthdayFrom=" + today.format(MONTH_DAY) + "&birthdayTo=" + rangeEnd.format(MONTH_DAY));
+                    "targetUrl", "/admin/students?birthdayFrom=" + today.format(MONTH_DAY) + "&birthdayTo="
+                            + rangeEnd.format(MONTH_DAY) + "&statuses=ACTIVE");
         });
         if (has(authentication, "AUDIT_READ")) add(widgets, failureCodes, "recentActivities", "DASHBOARD_ACTIVITY_UNAVAILABLE", requestId, () -> {
             List<Map<String, Object>> items = recentActivities(authentication);

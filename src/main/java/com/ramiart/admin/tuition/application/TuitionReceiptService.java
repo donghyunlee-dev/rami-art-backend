@@ -69,9 +69,9 @@ public final class TuitionReceiptService {
             if(!claim.created())return existingPlan(claim.resourceId(),null);
             Receipt receipt=repository.lockReceipt(receiptId).orElseThrow(()->new TuitionReceiptException("RECEIPT_NOT_FOUND"));
             if(receipt.currentVersion()!=request.receiptCurrentVersion())throw new TuitionReceiptException("RECEIPT_VERSION_CONFLICT");
-            if(!"ACTIVE".equals(receipt.status()))throw new TuitionReceiptException("RECEIPT_PAYMENT_NOT_CONFIRMED");
             Source source=repository.lockSource(receipt.paymentId()).orElseThrow(()->new TuitionReceiptException("TUITION_PAYMENT_NOT_FOUND"));
-            requireConfirmed(source);int version=receipt.currentVersion()+1;UUID versionId=UUID.randomUUID();Map<String,Object> snapshot=snapshot(source,clock.instant());
+            if(!List.of("CONFIRMED","CANCELLED").contains(source.paymentStatus()))throw new TuitionReceiptException("RECEIPT_PAYMENT_NOT_CONFIRMED");
+            int version=receipt.currentVersion()+1;UUID versionId=UUID.randomUUID();Map<String,Object> snapshot=snapshot(source,clock.instant());
             repository.beginReissue(receipt.id(),receipt.currentVersion(),version,versionId,actor,snapshot,source.refundAmount(),request.issueReason().trim());
             return new IssuePlan(new Receipt(receipt.id(),receipt.paymentId(),receipt.receiptNumber(),version,receipt.status()),source,snapshot,versionId,true);
         });
@@ -95,7 +95,10 @@ public final class TuitionReceiptService {
         String path="tuition-receipts/"+plan.receipt().receiptNumber().substring(2,8)+"/"+plan.receipt().id()+"-v"+plan.receipt().currentVersion()+".pdf";
         byte[] bytes;
         try{bytes=pdf.generate(plan.receipt().receiptNumber(),plan.receipt().currentVersion(),plan.source(),plan.snapshot());storage.upload(path,bytes);}
-        catch(RuntimeException e){transactions.executeWithoutResult(tx->{repository.markFailed(plan.versionId());repository.complete(scope,key,plan.receipt().id(),status);});
+        catch(RuntimeException e){
+            try{storage.delete(path);}catch(RuntimeException cleanupFailure){e.addSuppressed(cleanupFailure);}
+            try{transactions.executeWithoutResult(tx->{repository.markFailed(plan.versionId());repository.complete(scope,key,plan.receipt().id(),status);});}
+            catch(RuntimeException stateFailure){e.addSuppressed(stateFailure);}
             throw e instanceof TuitionReceiptException receiptException?receiptException:new TuitionReceiptException("RECEIPT_GENERATION_FAILED",e);}
         String hash=sha256(bytes);
         try{transactions.executeWithoutResult(tx->{repository.markReady(plan.versionId(),path,hash,bytes.length);repository.complete(scope,key,plan.receipt().id(),status);
@@ -119,7 +122,7 @@ public final class TuitionReceiptService {
     private static Map<String,Object> paymentSummary(Source s){return fields("paymentId",s.paymentId(),"billingId",s.billingId(),"yearMonth",s.yearMonth(),
             "paidOn",s.paidOn(),"amount",s.amount(),"method",s.method(),"paymentStatus",s.paymentStatus(),"paymentVersion",s.paymentVersion(),"billingVersion",s.billingVersion());}
     private static Map<String,Object> snapshot(Source s,Instant now){
-        long net=Math.max(s.amount()-s.refundAmount(),0);
+        long net="CONFIRMED".equals(s.paymentStatus())?Math.max(s.amount()-s.refundAmount(),0):0;
         return fields("schemaVersion",1,"studioName",s.studioName(),"maskedStudentName",mask(s.studentName()),"yearMonth",s.yearMonth(),
                 "paidOn",s.paidOn(),"amount",s.amount(),"method",s.method(),"paymentStatus",s.paymentStatus(),"refundAmount",s.refundAmount(),
                 "netPaidAmount",net,"issuedAt",now.truncatedTo(ChronoUnit.MICROS).toString());

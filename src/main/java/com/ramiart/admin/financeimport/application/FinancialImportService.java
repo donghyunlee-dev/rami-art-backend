@@ -24,6 +24,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -107,7 +108,7 @@ public class FinancialImportService {
         if(claim==null)throw new FinancialImportException("IMPORT_CONFIRMATION_FAILED");
         if(claim.replay()&&!("CONFIRMING".equals(claim.batch().status())))return repository.confirmation(batchId);
         List<UUID> pending=repository.validRowsForConfirmation(batchId,5000);
-        for(UUID rowId:pending){try{rowImporter.importRow(batchId,rowId,actor,metadata);}catch(DataAccessException e){repository.failRow(rowId,"IMPORT_DUPLICATE_DETECTED");}catch(RuntimeException e){repository.failRow(rowId,"IMPORT_ROW_FAILED");}}
+        for(UUID rowId:pending){try{rowImporter.importRow(batchId,rowId,actor,metadata);}catch(RuntimeException e){failImportedRow(rowId,e);}}
         return transaction.execute(s->repository.finishConfirmation(batchId));
     }
     public String resultFile(UUID id,Authentication auth){Batch b=get(id,auth);if(!b.actions().canDownloadResult())throw new FinancialImportException("IMPORT_RESULT_NOT_READY");return "\uFEFF"+repository.resultCsv(id);}
@@ -116,12 +117,17 @@ public class FinancialImportService {
             UUID actor=repository.confirmationActor(batchId).orElse(null);if(actor==null)continue;
             Metadata metadata=new Metadata("financial-import-recovery-"+UUID.randomUUID(),null,"financial-import-recovery");
             for(UUID rowId:repository.validRowsForConfirmation(batchId,5000)){
-                try{rowImporter.importRow(batchId,rowId,actor,metadata);}catch(DataAccessException e){repository.failRow(rowId,"IMPORT_DUPLICATE_DETECTED");}catch(RuntimeException e){repository.failRow(rowId,"IMPORT_ROW_FAILED");}
+                try{rowImporter.importRow(batchId,rowId,actor,metadata);}catch(RuntimeException e){failImportedRow(rowId,e);}
             }
             transaction.execute(status->repository.finishConfirmation(batchId));
         }
     }
     private static String value(Map<String,String> values,String key){return values.getOrDefault(key,"").trim();}
+    private void failImportedRow(UUID rowId,RuntimeException failure){
+        if(failure instanceof DuplicateKeyException)repository.failRow(rowId,"IMPORT_DUPLICATE_DETECTED");
+        else if(failure instanceof DataAccessException)repository.failRow(rowId,"IMPORT_SAVE_FAILED");
+        else repository.failRow(rowId,"IMPORT_ROW_FAILED");
+    }
     private static String decode(byte[] bytes){try{String text=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();return text.startsWith("\uFEFF")?text.substring(1):text;}catch(Exception e){throw new FinancialImportException("IMPORT_FILE_FORMAT_INVALID");}}
     private String hmac(String value){try{if(hmacKey==null||hmacKey.isBlank())throw new IllegalStateException();Mac mac=Mac.getInstance("HmacSHA256");mac.init(new SecretKeySpec(hmacKey.getBytes(StandardCharsets.UTF_8),"HmacSHA256"));mac.update("financial-import-dedup:v1:".getBytes(StandardCharsets.UTF_8));return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new FinancialImportException("IMPORT_CONFIGURATION_INVALID");}}
     private String encodeCursor(String value){String payload=Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));return payload+"."+hmac("cursor:"+payload);}

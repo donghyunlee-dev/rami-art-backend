@@ -78,6 +78,13 @@ class DashboardRepositoryIntegrationTest {
         UUID studentId = UUID.randomUUID();
         jdbc.update("insert into student(id,student_name,student_name_search,birthday,joined_at,status,created_by,updated_by) values(?,?,?,?,?,'ACTIVE',?,?)",
                 studentId, "대시보드 통합 원생", "대시보드통합원생", birthday, birthday.plusYears(6), actorId, actorId);
+        var futureInquiryAt = today.plusDays(1).atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime();
+        jdbc.update("""
+                insert into inquiry(id,name_ciphertext,name_hash,phone_ciphertext,phone_hash,phone_last4,
+                  message_ciphertext,consent_policy_version,consented_at,received_at,retention_expires_at)
+                values(?,?,?,?,?,?,?,?,?,?,?)
+                """, UUID.randomUUID(), new byte[]{1}, "0".repeat(64), new byte[]{1}, "1".repeat(64), "0000",
+                new byte[]{1}, "test", futureInquiryAt, futureInquiryAt, futureInquiryAt.plusYears(3));
 
         var attendance = repository.attendance(today);
         var tuition = repository.overdueTuition(today);
@@ -110,6 +117,12 @@ class DashboardRepositoryIntegrationTest {
         var summary = service.summary(today, "req_dashboard_test", authentication);
         assertThat(summary).isNotNull();
         assertThat(summary.widgets()).containsKeys("attendance", "tuition", "inquiries", "birthdays", "recentActivities");
+        assertThat(summary.widgets().get("inquiries").toString())
+                .contains("/admin/inquiries?statuses=RECEIVED,CONTACTING&from=" + today.minusDays(90) + "&to=" + today);
+        assertThat(summary.widgets().get("birthdays").toString())
+                .contains("/admin/students?birthdayFrom=" + today.format(java.time.format.DateTimeFormatter.ofPattern("MM-dd"))
+                        + "&birthdayTo=" + today.plusDays(6).format(java.time.format.DateTimeFormatter.ofPattern("MM-dd"))
+                        + "&statuses=ACTIVE");
         assertThat(summary.widgets().get("birthdays").toString()).contains("대시보드 통합 원생");
         assertThat(summary.widgets().get("recentActivities").toString())
                 .contains("원생 등록", recordedActivity.targetDisplay(), recordedActivity.actorDisplay());
@@ -120,6 +133,22 @@ class DashboardRepositoryIntegrationTest {
         assertThatThrownBy(() -> service.summary(today.minusDays(1), "req_dashboard_date", authentication))
                 .isInstanceOf(DashboardService.DashboardException.class)
                 .extracting("code").isEqualTo("DASHBOARD_DATE_NOT_SUPPORTED");
+    }
+
+    @Test
+    void dashboardDrilldownDateFiltersStayAlignedAcrossYearBoundary() {
+        var fixedClock = Clock.fixed(Instant.parse("2026-01-01T12:00:00Z"), java.time.ZoneId.of("UTC"));
+        var service = new DashboardService(repository, fixedClock, dataSource, "Asia/Seoul");
+        var authentication = new TestingAuthenticationToken("dashboard-test", "",
+                "DASHBOARD_READ", "INQUIRY_READ", "STUDENT_READ");
+
+        var summary = service.summary(null, "req_dashboard_year_boundary", authentication);
+
+        assertThat(summary.date()).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(summary.widgets().get("inquiries").toString())
+                .contains("/admin/inquiries?statuses=RECEIVED,CONTACTING&from=2025-10-03&to=2026-01-01");
+        assertThat(summary.widgets().get("birthdays").toString())
+                .contains("/admin/students?birthdayFrom=01-01&birthdayTo=01-07&statuses=ACTIVE");
     }
 
     @Test

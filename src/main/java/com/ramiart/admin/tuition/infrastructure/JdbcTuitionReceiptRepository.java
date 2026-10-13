@@ -56,7 +56,7 @@ public class JdbcTuitionReceiptRepository implements TuitionReceiptRepository {
         insertVersion(receipt,versionId,version,actor,snapshot,refund,reason);
     }
     @Override public void beginReissue(UUID receipt,int expected,int next,UUID versionId,UUID actor,Map<String,Object> snapshot,long refund,String reason){
-        int updated=jdbc.sql("update tuition_receipt set current_version=:next where id=:id and current_version=:expected and status='ACTIVE'")
+        int updated=jdbc.sql("update tuition_receipt set current_version=:next where id=:id and current_version=:expected and status in ('ACTIVE','VOID')")
                 .param("next",next).param("id",receipt).param("expected",expected).update();
         if(updated!=1)throw new TuitionReceiptException("RECEIPT_VERSION_CONFLICT");
         insertVersion(receipt,versionId,next,actor,snapshot,refund,reason);
