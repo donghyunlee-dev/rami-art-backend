@@ -8,6 +8,7 @@ import java.util.Map;
 public interface MonthlyDashboardRepository {
     Map<String, Object> tuition(YearMonth month);
     Map<String, Object> attendance(YearMonth month);
+    Map<String, Object> birthdays(YearMonth month);
     Map<String, Object> lessons(YearMonth month);
     Map<String, Object> enrollment(YearMonth month, ZoneId zone);
     Map<String, Object> capacity(LocalDate asOfDate);

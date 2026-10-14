@@ -20,8 +20,19 @@ public class JdbcMonthlyDashboardRepository implements MonthlyDashboardRepositor
         Map<String,Object> previous = tuitionValues(month.minusMonths(1));
         Map<String,Object> result = new LinkedHashMap<>(values);
         result.put("previousMonth", previous);
+        result.put("daily", dailyPayments(month));
         result.put("targetUrl", "/admin/tuition/billings?month=" + month);
         return result;
+    }
+
+    private List<Map<String,Object>> dailyPayments(YearMonth month) {
+        return jdbc.sql("""
+                select d.calendar_date::date calendar_date, coalesce(sum(p.amount),0)::bigint paid_amount
+                  from generate_series(:from::date,:to::date-1,interval '1 day') d(calendar_date)
+                  left join tuition_payment p on p.paid_on=d.calendar_date::date and p.status='CONFIRMED'
+                 group by d.calendar_date order by d.calendar_date
+                """).param("from",month.atDay(1)).param("to",month.plusMonths(1).atDay(1))
+                .query((r,i)->Map.<String,Object>of("date",r.getObject("calendar_date",LocalDate.class),"paidAmount",r.getLong("paid_amount"))).list();
     }
 
     private Map<String,Object> tuitionValues(YearMonth month) {
@@ -53,13 +64,42 @@ public class JdbcMonthlyDashboardRepository implements MonthlyDashboardRepositor
                   left join attendance_session s on s.attendance_date=d.calendar_date::date
                  group by d.calendar_date order by d.calendar_date
                 """).param("from",month.atDay(1)).param("to",month.plusMonths(1).atDay(1))
-                .query((r,i)->Map.<String,Object>of("date",r.getObject("calendar_date",LocalDate.class),"targetCount",r.getInt("target_count"),"attendedCount",r.getInt("attended_count"))).list();
+                .query((r,i)->{
+                    int target = r.getInt("target_count");
+                    int attended = r.getInt("attended_count");
+                    Map<String,Object> day = new LinkedHashMap<>();
+                    day.put("date",r.getObject("calendar_date",LocalDate.class));
+                    day.put("targetCount",target);
+                    day.put("attendedCount",attended);
+                    day.put("rate",target == 0 ? null : (double) attended / target);
+                    return day;
+                }).list();
         Double rate = totals[0] == 0 ? null : (double) totals[1] / totals[0];
         Map<String,Object> result = new LinkedHashMap<>();
         result.put("targetCount",totals[0]); result.put("attendedCount",totals[1]); result.put("absentCount",totals[2]);
         result.put("pendingCount",totals[3]); result.put("rate",rate); result.put("daily",daily);
         result.put("targetUrl","/admin/operations/attendance?month="+month);
         return result;
+    }
+
+    @Override public Map<String, Object> birthdays(YearMonth month) {
+        List<Map<String,Object>> items = jdbc.sql("""
+                select id, student_name, to_char(birthday,'MM-DD') birthday_month_day
+                  from student
+                 where status='ACTIVE' and birthday is not null
+                   and extract(month from birthday)=:month
+                 order by extract(day from birthday), student_name, id
+                """).param("month",month.getMonthValue())
+                .query((r,i)->{
+                    String birthdayMonthDay = r.getString("birthday_month_day");
+                    if ("02-29".equals(birthdayMonthDay) && !month.isLeapYear()) birthdayMonthDay = "02-28";
+                    return Map.<String,Object>of("studentId",r.getObject("id",java.util.UUID.class),
+                            "studentName",r.getString("student_name"),"birthdayMonthDay",birthdayMonthDay,
+                            "date",month+"-"+birthdayMonthDay);
+                }).list();
+        java.time.format.DateTimeFormatter monthDay = java.time.format.DateTimeFormatter.ofPattern("MM-dd");
+        return Map.of("items",items,"targetUrl","/admin/students?birthdayFrom="+month.atDay(1).format(monthDay)
+                +"&birthdayTo="+month.atEndOfMonth().format(monthDay)+"&statuses=ACTIVE");
     }
 
     @Override public Map<String, Object> lessons(YearMonth month) {

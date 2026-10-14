@@ -59,6 +59,8 @@ public class MonthlyDashboardService {
                 "TUITION_BILLING_READ", () -> repository.tuition(month));
         add(widgets, failures, "attendance", "DASHBOARD_ATTENDANCE_UNAVAILABLE", requestId, authentication,
                 "ATTENDANCE_READ", () -> repository.attendance(month));
+        add(widgets, failures, "birthdays", "DASHBOARD_BIRTHDAYS_UNAVAILABLE", requestId, authentication,
+                "STUDENT_READ", () -> repository.birthdays(month));
         add(widgets, failures, "lessons", "DASHBOARD_LESSONS_UNAVAILABLE", requestId, authentication,
                 "LESSON_PLAN_READ", () -> repository.lessons(month));
         add(widgets, failures, "enrollment", "DASHBOARD_ENROLLMENT_UNAVAILABLE", requestId, authentication,
