@@ -10,6 +10,27 @@ create table if not exists rami_art_studio.admin_users (
     updated_at timestamptz not null default now()
 );
 
+do $auth_rate_limit_schema$
+begin
+  if to_regclass('rami_art_studio.admin_auth_rate_limit') is null
+    and to_regclass('public.admin_auth_rate_limit') is not null then
+    alter table public.admin_auth_rate_limit set schema rami_art_studio;
+  end if;
+end
+$auth_rate_limit_schema$;
+
+create table if not exists rami_art_studio.admin_auth_rate_limit (
+    bucket_hash char(64) primary key,
+    attempts integer not null check (attempts > 0),
+    expires_at timestamptz not null,
+    constraint ck_admin_auth_rate_limit_hash check (bucket_hash ~ '^[0-9a-f]{64}$')
+);
+
+create index if not exists ix_admin_auth_rate_limit_expiry
+    on rami_art_studio.admin_auth_rate_limit (expires_at);
+alter table rami_art_studio.admin_auth_rate_limit enable row level security;
+revoke all on rami_art_studio.admin_auth_rate_limit from anon, authenticated;
+
 create table if not exists rami_art_studio.admin_refresh_tokens (
     id uuid primary key default gen_random_uuid(),
     admin_user_id uuid not null references rami_art_studio.admin_users(id) on delete cascade,
@@ -85,6 +106,9 @@ begin
       rami_art_studio.gallery_categories,
       rami_art_studio.gallery_works
       to rami_backend';
+    execute 'grant select, insert, update, delete on rami_art_studio.admin_auth_rate_limit to rami_backend';
+    execute 'drop policy if exists admin_auth_rate_limit_backend_all on rami_art_studio.admin_auth_rate_limit';
+    execute 'create policy admin_auth_rate_limit_backend_all on rami_art_studio.admin_auth_rate_limit for all to rami_backend using (true) with check (true)';
   end if;
 end
 $grant_backend$;

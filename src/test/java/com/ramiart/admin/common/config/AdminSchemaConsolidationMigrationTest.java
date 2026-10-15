@@ -27,6 +27,7 @@ class AdminSchemaConsolidationMigrationTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("create role anon");
             statement.execute("create role authenticated");
+            statement.execute("create role rami_backend");
             statement.execute("create schema extensions");
         }
         Path root = projectRoot();
@@ -51,10 +52,15 @@ class AdminSchemaConsolidationMigrationTest {
         assertThat(jdbc.queryForObject("select count(*) from rami_art_studio.admin_permission", Integer.class)).isGreaterThan(0);
         assertThat(jdbc.queryForObject("select count(*) from rami_art_studio.finance_category", Integer.class)).isGreaterThan(0);
         assertThat(jdbc.queryForObject("select count(*) from rami_art_studio.admin_role_permission", Integer.class)).isGreaterThan(0);
+        assertThat(jdbc.queryForObject("select has_table_privilege('rami_backend', 'rami_art_studio.admin_auth_rate_limit', 'select,insert,update,delete')", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select exists(select 1 from pg_policies where schemaname='rami_art_studio' and tablename='admin_auth_rate_limit' and policyname='admin_auth_rate_limit_backend_all')", Boolean.class)).isTrue();
     }
 
     @Test
     void legacyCleanupRestoresTablesRequiredByBackendEntities() throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("alter table rami_art_studio.admin_auth_rate_limit set schema public");
+        }
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V8__remove_unused_legacy_schema_objects.sql"));
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V9__restore_backend_entity_tables.sql"));
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("scripts/verify-admin-schema.sql"));
@@ -67,6 +73,8 @@ class AdminSchemaConsolidationMigrationTest {
         assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.gallery_categories') is not null", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.gallery_works') is not null", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_user') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('public.admin_auth_rate_limit') is null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_auth_rate_limit') is not null", Boolean.class)).isTrue();
     }
 
     private static EmbeddedPostgres startPostgres() {
