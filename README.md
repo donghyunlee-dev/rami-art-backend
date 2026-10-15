@@ -19,13 +19,13 @@ the existing public API and the administrator API from one Render service.
 ./gradlew bootRun
 ```
 
-From the monorepo root, use `bun run backend:dev`, `bun run backend:build`, or
-`bun run backend:test`. The development wrapper loads the ignored root
+From the monorepo root, use `npm run backend:dev`, `npm run backend:build`, or
+`npm run backend:test`. The development wrapper loads the ignored root
 `.env.backend.dev.local` when present, otherwise `.env.backend.local`;
 see `.env.backend.local.example` for required names.
 Build and test commands do not load development database credentials.
 
-`bun run backend:local-db` starts disposable PostgreSQL on port 54322 and applies
+`npm run backend:local-db` starts disposable PostgreSQL on port 54322 and applies
 the root administrator migrations and local seed. The local-only account is
 `owner@rami.local`, with temporary password `LocalOnly!Change123`; change it on
 first login. Never apply this seed to production.

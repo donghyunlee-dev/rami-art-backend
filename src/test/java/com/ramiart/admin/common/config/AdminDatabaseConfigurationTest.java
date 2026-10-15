@@ -24,6 +24,7 @@ class AdminDatabaseConfigurationTest {
                     .isEqualTo("SET search_path TO rami_art_studio, extensions");
             assertThat(properties.getProperty("spring.jpa.properties.hibernate.default_schema")).isEqualTo("rami_art_studio");
             assertThat(properties.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("none");
+            assertThat(properties.getProperty("spring.jpa.properties.hibernate.hbm2ddl.auto")).isEqualTo("none");
             assertThat(properties.getProperty("spring.flyway.default-schema")).isEqualTo("rami_art_studio");
             assertThat(properties.getProperty("spring.flyway.schemas")).isEqualTo("rami_art_studio");
             assertThat(properties.getProperty("app.security.legacy-bootstrap-enabled")).isEqualTo(false);

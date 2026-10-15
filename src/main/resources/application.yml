@@ -36,6 +36,8 @@ spring:
     properties:
       hibernate:
         default_schema: rami_art_studio
+        hbm2ddl:
+          auto: none
         type:
           bind: true
         format_sql: true

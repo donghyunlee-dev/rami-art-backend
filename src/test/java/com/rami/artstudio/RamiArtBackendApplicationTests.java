@@ -7,7 +7,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.rami.artstudio.support.LegacyEmbeddedPostgres;
 
-@SpringBootTest(properties = "spring.flyway.enabled=true")
+@SpringBootTest(properties = {"spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=validate"})
 class RamiArtBackendApplicationTests {
 
 	@DynamicPropertySource
