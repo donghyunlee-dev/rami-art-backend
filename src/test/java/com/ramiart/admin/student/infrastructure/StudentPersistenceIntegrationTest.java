@@ -74,6 +74,7 @@ class StudentPersistenceIntegrationTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             createRole(statement, "anon");
             createRole(statement, "authenticated");
+            statement.execute("drop schema if exists rami_art_studio cascade");
             statement.execute("drop schema if exists public cascade");
             statement.execute("drop schema if exists extensions cascade");
             statement.execute("create schema public");

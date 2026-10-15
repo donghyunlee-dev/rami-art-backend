@@ -47,6 +47,7 @@ class PrivateEvidenceIntegrationTest {
         org.mockito.Mockito.reset(storage);jdbc=new JdbcTemplate(dataSource);
         try(var c=dataSource.getConnection();var s=c.createStatement()){
             for(String role:List.of("anon","authenticated"))s.execute("do $$ begin if not exists(select 1 from pg_roles where rolname='"+role+"') then create role "+role+"; end if; end $$");
+            s.execute("drop schema if exists rami_art_studio cascade");
             s.execute("drop schema if exists public cascade");s.execute("drop schema if exists extensions cascade");s.execute("create schema public");s.execute("create schema extensions");
         }
         Path root=Path.of("").toAbsolutePath().normalize();

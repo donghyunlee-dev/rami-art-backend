@@ -52,7 +52,7 @@ class InquiryPersistenceIntegrationTest {
         r.add("admin.security.inquiry-data-key",()->"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");r.add("admin.inquiry.consent-policy-version",()->"privacy-2026-07");
     }
     @BeforeEach void reset()throws Exception{jdbc=new JdbcTemplate(dataSource);try(Connection c=dataSource.getConnection();Statement s=c.createStatement()){
-        role(s,"anon");role(s,"authenticated");s.execute("drop schema if exists public cascade");s.execute("drop schema if exists extensions cascade");s.execute("create schema public");s.execute("create schema extensions");}
+        role(s,"anon");role(s,"authenticated");s.execute("drop schema if exists rami_art_studio cascade");s.execute("drop schema if exists public cascade");s.execute("drop schema if exists extensions cascade");s.execute("create schema public");s.execute("create schema extensions");}
         try(var files=Files.list(root().resolve("supabase/migrations"))){for(Path p:files.filter(v->v.toString().endsWith(".sql")).sorted().toList())PostgresScriptRunner.execute(dataSource,p);}PostgresScriptRunner.execute(dataSource,root().resolve("supabase/seed.sql"));}
     @AfterAll void close()throws IOException{POSTGRES.close();}
 

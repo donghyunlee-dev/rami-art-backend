@@ -52,6 +52,7 @@ class SiteBrandPersistenceIntegrationTest {
         jdbc = new JdbcTemplate(dataSource);
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
             createRoleIfMissing(s, "anon"); createRoleIfMissing(s, "authenticated");
+            s.execute("drop schema if exists rami_art_studio cascade");
             s.execute("drop schema if exists public cascade"); s.execute("drop schema if exists extensions cascade");
             s.execute("create schema public"); s.execute("create schema extensions");
         } catch (SQLException e) { if (!"42710".equals(e.getSQLState())) throw e; }

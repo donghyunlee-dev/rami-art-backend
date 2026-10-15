@@ -73,12 +73,12 @@ public class JdbcConsentRepository implements ConsentRepository {
     }
     private boolean notificationTableAvailable(){
         Boolean available=notificationTableAvailable;
-        if(available==null){available=Boolean.TRUE.equals(jdbc.getJdbcTemplate().queryForObject("select to_regclass('public.notification_message') is not null",Boolean.class));notificationTableAvailable=available;}
+        if(available==null){available=Boolean.TRUE.equals(jdbc.getJdbcTemplate().queryForObject("select to_regclass('rami_art_studio.notification_message') is not null",Boolean.class));notificationTableAvailable=available;}
         return available;
     }
     private boolean galleryTableAvailable(){
         Boolean available=galleryTableAvailable;
-        if(available==null){available=Boolean.TRUE.equals(jdbc.getJdbcTemplate().queryForObject("select to_regclass('public.gallery_artwork') is not null",Boolean.class));galleryTableAvailable=available;}
+        if(available==null){available=Boolean.TRUE.equals(jdbc.getJdbcTemplate().queryForObject("select to_regclass('rami_art_studio.gallery_artwork') is not null",Boolean.class));galleryTableAvailable=available;}
         return available;
     }
     @Override public Optional<Policy> currentPublishedPolicy(UUID id,String type){return jdbc.query("select "+POLICY_COLUMNS+" from consent_policy where id=:id and type=:type and status='PUBLISHED'",Map.of("id",id,"type",type),this::policyRow).stream().findFirst();}

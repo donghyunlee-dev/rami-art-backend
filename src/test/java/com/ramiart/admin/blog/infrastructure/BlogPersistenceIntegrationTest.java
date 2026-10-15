@@ -55,7 +55,7 @@ class BlogPersistenceIntegrationTest {
     @BeforeEach void reset() throws Exception {
         jdbc=new JdbcTemplate(dataSource);
         try(Connection c=dataSource.getConnection();Statement s=c.createStatement()) {
-            role(s,"anon"); role(s,"authenticated"); s.execute("drop schema if exists public cascade");
+            role(s,"anon"); role(s,"authenticated"); s.execute("drop schema if exists rami_art_studio cascade"); s.execute("drop schema if exists public cascade");
             s.execute("drop schema if exists extensions cascade"); s.execute("create schema public"); s.execute("create schema extensions");
         }
         try(var migrations=Files.list(projectRoot().resolve("supabase/migrations"))) {

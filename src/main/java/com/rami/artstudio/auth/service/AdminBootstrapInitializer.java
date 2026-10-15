@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +14,7 @@ import com.rami.artstudio.auth.infra.AdminUserRepository;
 import com.rami.artstudio.common.config.AppSecurityProperties;
 
 @Component
+@ConditionalOnProperty(prefix = "app.security", name = "legacy-bootstrap-enabled", havingValue = "true")
 public class AdminBootstrapInitializer implements ApplicationRunner {
 
     private final AdminUserRepository adminUserRepository;

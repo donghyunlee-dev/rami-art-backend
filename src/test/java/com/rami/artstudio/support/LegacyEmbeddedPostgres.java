@@ -35,6 +35,8 @@ public final class LegacyEmbeddedPostgres {
         registry.add("spring.datasource.username", () -> "postgres");
         registry.add("spring.datasource.password", () -> "postgres");
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.flyway.target", () -> "7");
+        registry.add("app.security.legacy-bootstrap-enabled", () -> "true");
     }
 
     private static EmbeddedPostgres startPostgres() {

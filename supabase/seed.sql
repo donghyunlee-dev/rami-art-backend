@@ -1,5 +1,5 @@
 -- Local development bootstrap only. Change the temporary password immediately.
-insert into public.admin_role (id, code, name, description, display_order)
+insert into rami_art_studio.admin_role (id, code, name, description, display_order)
 values
     ('10000000-0000-0000-0000-000000000001', 'OWNER', '원장', '전체 운영과 보안 설정', 1),
     ('10000000-0000-0000-0000-000000000002', 'OPERATOR', '운영 관리자', '원생·수업·출석·문의 관리', 2),
@@ -11,7 +11,7 @@ on conflict (code) do update set
     display_order = excluded.display_order,
     active = true;
 
-insert into public.admin_permission (code, name, domain, operation, description)
+insert into rami_art_studio.admin_permission (code, name, domain, operation, description)
 values
     ('DASHBOARD_READ', '대시보드 조회', 'DASHBOARD', 'READ', '관리자 대시보드 조회'),
     ('STUDENT_READ', '원생 조회', 'STUDENT', 'READ', '원생 기본 정보 조회'),
@@ -93,17 +93,17 @@ on conflict (code) do update set
     description = excluded.description,
     active = true;
 
-insert into public.admin_role_permission (admin_role_id, admin_permission_id)
+insert into rami_art_studio.admin_role_permission (admin_role_id, admin_permission_id)
 select role.id, permission.id
-from public.admin_role role
-cross join public.admin_permission permission
+from rami_art_studio.admin_role role
+cross join rami_art_studio.admin_permission permission
 where role.code = 'OWNER' and permission.active
 on conflict do nothing;
 
-insert into public.admin_role_permission (admin_role_id, admin_permission_id)
+insert into rami_art_studio.admin_role_permission (admin_role_id, admin_permission_id)
 select role.id, permission.id
-from public.admin_role role
-join public.admin_permission permission on permission.code = any (array[
+from rami_art_studio.admin_role role
+join rami_art_studio.admin_permission permission on permission.code = any (array[
     'DASHBOARD_READ', 'STUDENT_READ', 'STUDENT_WRITE', 'STUDENT_STATUS_WRITE',
     'STUDENT_NOTE_READ', 'STUDENT_NOTE_WRITE', 'STUDENT_SCHEDULE_WRITE',
     'SCHEDULE_READ', 'SCHEDULE_WRITE', 'SCHEDULE_PUBLISH', 'ATTENDANCE_READ',
@@ -117,10 +117,10 @@ join public.admin_permission permission on permission.code = any (array[
 where role.code = 'OPERATOR'
 on conflict do nothing;
 
-insert into public.admin_role_permission (admin_role_id, admin_permission_id)
+insert into rami_art_studio.admin_role_permission (admin_role_id, admin_permission_id)
 select role.id, permission.id
-from public.admin_role role
-join public.admin_permission permission on permission.code = any (array[
+from rami_art_studio.admin_role role
+join rami_art_studio.admin_permission permission on permission.code = any (array[
     'DASHBOARD_READ', 'SITE_BRAND_READ', 'SITE_BRAND_WRITE', 'SITE_BRAND_PUBLISH',
     'CONTENT_PROFILE_READ', 'CONTENT_PROFILE_WRITE', 'CONTENT_PROGRAM_READ',
     'CONTENT_PROGRAM_WRITE', 'MEDIA_WRITE', 'GALLERY_READ', 'GALLERY_WRITE',
@@ -130,10 +130,10 @@ join public.admin_permission permission on permission.code = any (array[
 where role.code = 'CONTENT'
 on conflict do nothing;
 
-insert into public.admin_role_permission (admin_role_id, admin_permission_id)
+insert into rami_art_studio.admin_role_permission (admin_role_id, admin_permission_id)
 select role.id, permission.id
-from public.admin_role role
-join public.admin_permission permission on permission.code = any (array[
+from rami_art_studio.admin_role role
+join rami_art_studio.admin_permission permission on permission.code = any (array[
     'DASHBOARD_READ', 'STUDENT_READ', 'STUDENT_TUITION_WRITE', 'TUITION_POLICY_READ',
     'TUITION_POLICY_WRITE', 'TUITION_BILLING_READ', 'TUITION_BILLING_WRITE',
     'TUITION_PAYMENT_READ', 'TUITION_PAYMENT_WRITE', 'TUITION_ADJUSTMENT_READ',
@@ -145,7 +145,7 @@ join public.admin_permission permission on permission.code = any (array[
 where role.code = 'FINANCE'
 on conflict do nothing;
 
-insert into public.admin_user (
+insert into rami_art_studio.admin_user (
     id, email, password_hash, display_name, password_must_change,
     temporary_password_expires_at, created_by
 )
@@ -160,16 +160,16 @@ values (
 )
 on conflict (id) do nothing;
 
-insert into public.admin_user_role (admin_user_id, admin_role_id, assigned_by)
+insert into rami_art_studio.admin_user_role (admin_user_id, admin_role_id, assigned_by)
 select
     '20000000-0000-0000-0000-000000000001'::uuid,
     role.id,
     null
-from public.admin_role role
+from rami_art_studio.admin_role role
 where role.code = 'OWNER'
 on conflict (admin_user_id) do update set admin_role_id = excluded.admin_role_id;
 
-insert into public.admin_session_policy (
+insert into rami_art_studio.admin_session_policy (
     id, version, max_failed_attempts, lock_duration_minutes,
     idle_timeout_minutes, absolute_timeout_minutes, expiry_warning_minutes,
     change_reason, created_by

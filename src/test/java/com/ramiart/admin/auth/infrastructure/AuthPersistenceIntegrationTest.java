@@ -216,6 +216,7 @@ class AuthPersistenceIntegrationTest {
                 Statement statement = connection.createStatement()) {
             createRoleIfMissing(statement, "anon");
             createRoleIfMissing(statement, "authenticated");
+            statement.execute("drop schema if exists rami_art_studio cascade");
             statement.execute("drop schema if exists public cascade");
             statement.execute("drop schema if exists extensions cascade");
             statement.execute("create schema public");
@@ -1504,7 +1505,7 @@ class AuthPersistenceIntegrationTest {
     @Test
     void publicRolesHaveNoTablePrivilegesAndRlsDeniesEvenAccidentalSelectGrants() throws SQLException {
         var tables = jdbcTemplate.queryForList("""
-                select tablename from pg_tables where schemaname = 'public' order by tablename
+                select tablename from pg_tables where schemaname = 'rami_art_studio' order by tablename
                 """, String.class);
         assertThat(tables).contains(
                 "admin_auth_rate_limit", "admin_compromised_password", "admin_password_history",
@@ -1517,16 +1518,16 @@ class AuthPersistenceIntegrationTest {
                     for (String table : tables) {
                         assertThat(jdbcTemplate.queryForObject(
                                 "select has_table_privilege(?, ?, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')",
-                                Boolean.class, role, "public." + table)).isFalse();
+                                Boolean.class, role, "rami_art_studio." + table)).isFalse();
                         assertThat(jdbcTemplate.queryForObject(
-                                "select rowsecurity from pg_tables where schemaname = 'public' and tablename = ?",
+                                "select rowsecurity from pg_tables where schemaname = 'rami_art_studio' and tablename = ?",
                                 Boolean.class, table)).isTrue();
                     }
-                    statement.execute("grant usage on schema public to " + role);
-                    statement.execute("grant select on all tables in schema public to " + role);
+                    statement.execute("grant usage on schema rami_art_studio to " + role);
+                    statement.execute("grant select on all tables in schema rami_art_studio to " + role);
                     statement.execute("set local role " + role);
                     for (String table : tables) {
-                        try (var rows = statement.executeQuery("select count(*) from public." + table)) {
+                        try (var rows = statement.executeQuery("select count(*) from rami_art_studio." + table)) {
                             rows.next();
                             assertThat(rows.getLong(1)).as(role + ": " + table).isZero();
                         }
