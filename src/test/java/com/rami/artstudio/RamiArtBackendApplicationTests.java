@@ -12,7 +12,7 @@ class RamiArtBackendApplicationTests {
 
 	@DynamicPropertySource
 	static void configureDataSource(DynamicPropertyRegistry registry) {
-		LegacyEmbeddedPostgres.configure(registry, "legacy_application_tests");
+		LegacyEmbeddedPostgres.configure(registry, "legacy_application_tests", "9");
 	}
 
 	@Test

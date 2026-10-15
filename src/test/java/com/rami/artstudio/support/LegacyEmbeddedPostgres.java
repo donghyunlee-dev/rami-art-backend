@@ -24,6 +24,10 @@ public final class LegacyEmbeddedPostgres {
     }
 
     public static void configure(DynamicPropertyRegistry registry, String databaseName) {
+        configure(registry, databaseName, "7");
+    }
+
+    public static void configure(DynamicPropertyRegistry registry, String databaseName, String flywayTarget) {
         ensureDatabase(databaseName);
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
@@ -35,7 +39,7 @@ public final class LegacyEmbeddedPostgres {
         registry.add("spring.datasource.username", () -> "postgres");
         registry.add("spring.datasource.password", () -> "postgres");
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
-        registry.add("spring.flyway.target", () -> "7");
+        registry.add("spring.flyway.target", () -> flywayTarget);
         registry.add("app.security.legacy-bootstrap-enabled", () -> "true");
     }
 

@@ -54,12 +54,18 @@ class AdminSchemaConsolidationMigrationTest {
     }
 
     @Test
-    void legacyCleanupKeepsCurrentSchemaObjectsAndRemovesLegacyTables() throws Exception {
+    void legacyCleanupRestoresTablesRequiredByBackendEntities() throws Exception {
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V8__remove_unused_legacy_schema_objects.sql"));
+        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V9__restore_backend_entity_tables.sql"));
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("scripts/verify-admin-schema.sql"));
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_users') is null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_refresh_tokens') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_users') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.classes') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.class_tags') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.gallery_categories') is not null", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.gallery_works') is not null", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_user') is not null", Boolean.class)).isTrue();
     }
 
