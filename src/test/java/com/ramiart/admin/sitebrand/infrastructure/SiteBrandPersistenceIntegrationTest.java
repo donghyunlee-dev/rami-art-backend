@@ -57,7 +57,7 @@ class SiteBrandPersistenceIntegrationTest {
             s.execute("create schema public"); s.execute("create schema extensions");
         } catch (SQLException e) { if (!"42710".equals(e.getSQLState())) throw e; }
         try (var paths = Files.list(projectRoot().resolve("supabase/migrations"))) {
-            for (Path p : paths.filter(x -> x.toString().endsWith(".sql")).sorted().toList()) {
+            for (Path p : paths.filter(x -> x.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) {
                 PostgresScriptRunner.execute(dataSource, p);
             }
         }

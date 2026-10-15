@@ -59,7 +59,7 @@ class BlogPersistenceIntegrationTest {
             s.execute("drop schema if exists extensions cascade"); s.execute("create schema public"); s.execute("create schema extensions");
         }
         try(var migrations=Files.list(projectRoot().resolve("supabase/migrations"))) {
-            for(Path p:migrations.filter(p->p.toString().endsWith(".sql")).sorted().toList()) PostgresScriptRunner.execute(dataSource,p);
+            for(Path p:migrations.filter(p->p.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) PostgresScriptRunner.execute(dataSource,p);
         }
         PostgresScriptRunner.execute(dataSource,projectRoot().resolve("supabase/seed.sql"));
     }

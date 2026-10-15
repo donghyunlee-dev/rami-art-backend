@@ -56,7 +56,7 @@ class FinancialImportConfirmationIntegrationTest {
         }
         Path root=projectRoot();
         try(var migrations=Files.list(root.resolve("supabase/migrations"))){
-            for(Path migration:migrations.filter(path->path.toString().endsWith(".sql")).sorted().toList())PostgresScriptRunner.execute(DATA_SOURCE,migration);
+            for(Path migration:migrations.filter(path->path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList())PostgresScriptRunner.execute(DATA_SOURCE,migration);
         }
         PostgresScriptRunner.execute(DATA_SOURCE,root.resolve("supabase/seed.sql"));
         actorId=JDBC.queryForObject("select id from admin_user order by email limit 1",UUID.class);

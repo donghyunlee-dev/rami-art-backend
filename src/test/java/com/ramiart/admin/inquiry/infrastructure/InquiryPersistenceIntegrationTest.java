@@ -53,7 +53,7 @@ class InquiryPersistenceIntegrationTest {
     }
     @BeforeEach void reset()throws Exception{jdbc=new JdbcTemplate(dataSource);try(Connection c=dataSource.getConnection();Statement s=c.createStatement()){
         role(s,"anon");role(s,"authenticated");s.execute("drop schema if exists rami_art_studio cascade");s.execute("drop schema if exists public cascade");s.execute("drop schema if exists extensions cascade");s.execute("create schema public");s.execute("create schema extensions");}
-        try(var files=Files.list(root().resolve("supabase/migrations"))){for(Path p:files.filter(v->v.toString().endsWith(".sql")).sorted().toList())PostgresScriptRunner.execute(dataSource,p);}PostgresScriptRunner.execute(dataSource,root().resolve("supabase/seed.sql"));}
+        try(var files=Files.list(root().resolve("supabase/migrations"))){for(Path p:files.filter(v->v.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList())PostgresScriptRunner.execute(dataSource,p);}PostgresScriptRunner.execute(dataSource,root().resolve("supabase/seed.sql"));}
     @AfterAll void close()throws IOException{POSTGRES.close();}
 
     @Test void publicSubmissionEncryptsAndIsIdempotentWhileHoneypotDoesNotPersist(){UUID key=UUID.randomUUID();var command=submission("김보호","010-1234-5678","");

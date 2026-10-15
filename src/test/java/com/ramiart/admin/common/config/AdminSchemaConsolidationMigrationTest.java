@@ -31,7 +31,7 @@ class AdminSchemaConsolidationMigrationTest {
         }
         Path root = projectRoot();
         try (var files = Files.list(root.resolve("supabase/migrations"))) {
-            for (Path migration : files.filter(file -> file.toString().endsWith(".sql")).sorted().toList()) {
+            for (Path migration : files.filter(file -> file.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) {
                 PostgresScriptRunner.execute(dataSource, migration);
             }
         }

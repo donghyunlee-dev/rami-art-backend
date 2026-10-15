@@ -85,7 +85,7 @@ class StaffPersistenceIntegrationTest {
             statement.execute("create schema extensions");
         }
         try (var migrations = Files.list(projectRoot().resolve("supabase/migrations"))) {
-            for (Path migration : migrations.filter(path -> path.toString().endsWith(".sql")).sorted().toList()) {
+            for (Path migration : migrations.filter(path -> path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) {
                 PostgresScriptRunner.execute(dataSource, migration);
             }
         }

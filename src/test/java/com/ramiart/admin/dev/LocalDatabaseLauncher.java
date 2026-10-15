@@ -62,7 +62,7 @@ public final class LocalDatabaseLauncher {
     private static void applyDatabaseFiles(EmbeddedPostgres postgres, Path migrations, Path seed)
             throws IOException, SQLException {
         try (var paths = Files.list(migrations)) {
-            for (Path migration : paths.filter(path -> path.toString().endsWith(".sql")).sorted().toList()) {
+            for (Path migration : paths.filter(path -> path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) {
                 PostgresScriptRunner.execute(postgres.getPostgresDatabase(), migration);
             }
         }
