@@ -251,7 +251,7 @@ public class SecurityConfiguration {
                                 .hasAuthority("COURSE_WRITE")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/courses/*", "/api/admin/class-groups/*")
                                 .hasAuthority("COURSE_WRITE")
-                        .requestMatchers(HttpMethod.DELETE, "/api/admin/class-groups/*")
+                        .requestMatchers(HttpMethod.DELETE, "/api/admin/courses/*", "/api/admin/class-groups/*")
                                 .hasAuthority("COURSE_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/staff", "/api/admin/staff/**")
                                 .hasAuthority("STAFF_READ")

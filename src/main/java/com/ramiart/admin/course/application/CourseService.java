@@ -156,6 +156,26 @@ public class CourseService {
         repository.complete(scope, idempotencyKey, id, 204);
     }
 
+    @Transactional
+    public void deleteCourse(UUID id, long version, UUID actorId, UUID idempotencyKey,
+            RequestMetadata metadata) {
+        if (version < 0) throw new CourseException("COURSE_VALIDATION_ERROR");
+        String scope = "COURSE_DELETE:" + id;
+        var claim = repository.claim(scope, idempotencyKey, hash(id + ":" + version));
+        if (!claim.claimed()) return;
+
+        var state = repository.lockCourseForDeletion(id)
+                .orElseThrow(() -> new CourseException("COURSE_NOT_FOUND"));
+        if (state.referenced()) throw new CourseException("COURSE_REFERENCED");
+        if (state.version() != version || repository.deleteCourse(id, version) == 0) {
+            throw new CourseException("COURSE_VERSION_CONFLICT");
+        }
+
+        audit(actorId, metadata, "COURSE_DELETED", "COURSE", id,
+                Map.of("code", state.code(), "version", version));
+        repository.complete(scope, idempotencyKey, id, 204);
+    }
+
     private void audit(UUID actorId, RequestMetadata metadata, String action, String targetType,
             UUID targetId, Map<String, Object> details) {
         auditRecorder.record(new Event(clock.instant(), metadata.requestId(), "MGT-COURSE-MASTER", "OPERATION",

@@ -117,7 +117,11 @@ public class AdminGlobalExceptionHandler {
             String detail = rootMessage(exception);
             boolean deletingClassGroup = "DELETE".equals(request.getMethod())
                     && request.getRequestURI().startsWith("/api/admin/class-groups/");
-            String code = deletingClassGroup && detail.contains("foreign key constraint")
+            boolean deletingCourse = "DELETE".equals(request.getMethod())
+                    && request.getRequestURI().startsWith("/api/admin/courses/");
+            String code = deletingCourse && detail.contains("foreign key constraint")
+                    ? "COURSE_REFERENCED"
+                    : deletingClassGroup && detail.contains("foreign key constraint")
                     ? "CLASS_GROUP_REFERENCED"
                     : detail.contains("course_code_key") || detail.contains("class_group_code_key")
                     ? "COURSE_CODE_DUPLICATED"
@@ -202,6 +206,8 @@ public class AdminGlobalExceptionHandler {
                     "운영 중인 다른 과정이 같은 표시 순서를 사용하고 있습니다.");
             case "COURSE_VERSION_CONFLICT" -> new ErrorDefinition(HttpStatus.CONFLICT,
                     "다른 관리자가 먼저 변경했습니다. 최신 정보를 다시 확인해 주세요.");
+            case "COURSE_REFERENCED" -> new ErrorDefinition(HttpStatus.CONFLICT,
+                    "반, 문의 또는 콘텐츠에서 사용 중인 과정은 삭제할 수 없습니다.");
             case "IDEMPOTENCY_KEY_REUSED" -> new ErrorDefinition(HttpStatus.CONFLICT,
                     "같은 요청 키가 다른 내용에 사용되었습니다.");
             case "IDEMPOTENCY_IN_PROGRESS" -> new ErrorDefinition(HttpStatus.CONFLICT,

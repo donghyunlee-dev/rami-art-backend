@@ -103,6 +103,63 @@ class CoursePersistenceIntegrationTest {
         assertThat(codeMatch.content()).extracting("id").doesNotContain(created.id());
     }
 
+    @Test
+    void courseCanBeDeletedOnlyWhenItHasNoClassOrOtherReferences() {
+        UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
+        var metadata = new CourseService.RequestMetadata("req_course_delete", "127.0.0.1", "integration-test");
+        var deletable = courseService.createCourse(new CourseWrite(
+                "DELETE_ME", "삭제 가능 과정", null, null, null, null, 10, true, null),
+                actorId, UUID.randomUUID(), metadata);
+
+        UUID deleteKey = UUID.randomUUID();
+        courseService.deleteCourse(deletable.id(), deletable.version(), actorId, deleteKey, metadata);
+        courseService.deleteCourse(deletable.id(), deletable.version(), actorId, deleteKey, metadata);
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from course where id = ?", Integer.class, deletable.id())).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_log where action = 'COURSE_DELETED'", Integer.class)).isOne();
+
+        var referencedByGroup = courseService.createCourse(new CourseWrite(
+                "HAS_GROUP", "반이 있는 과정", null, null, null, null, 20, true, null),
+                actorId, UUID.randomUUID(), metadata);
+        courseService.createClassGroup(referencedByGroup.id(), new ClassGroupWrite(
+                "HAS_GROUP_A", "준비 반", "ROOM_A", 8, true, 30,
+                LocalDate.now(), null, "DRAFT", null), actorId, UUID.randomUUID(), metadata);
+        assertCourseDeleteBlocked(referencedByGroup.id(), referencedByGroup.version(), actorId, metadata);
+
+        var referencedByInquiry = courseService.createCourse(new CourseWrite(
+                "HAS_INQUIRY", "문의에 연결된 과정", null, null, null, null, 30, true, null),
+                actorId, UUID.randomUUID(), metadata);
+        jdbcTemplate.update("""
+                insert into inquiry (id, name_ciphertext, name_hash, phone_ciphertext, phone_hash, phone_last4,
+                    interested_course_id, message_ciphertext, consent_policy_version)
+                values (?, decode('0000', 'hex'), ?, decode('0000', 'hex'), ?, '1234', ?, decode('0000', 'hex'), 'v1')
+                """, UUID.randomUUID(), "0".repeat(64), "0".repeat(64), referencedByInquiry.id());
+        assertCourseDeleteBlocked(referencedByInquiry.id(), referencedByInquiry.version(), actorId, metadata);
+
+        var referencedByProgram = courseService.createCourse(new CourseWrite(
+                "HAS_PROGRAM", "수업 소개에 연결된 과정", null, null, null, null, 40, true, null),
+                actorId, UUID.randomUUID(), metadata);
+        jdbcTemplate.update("insert into class_program (id, course_id, revision, created_by) values (?, ?, 1, ?)",
+                UUID.randomUUID(), referencedByProgram.id(), actorId);
+        assertCourseDeleteBlocked(referencedByProgram.id(), referencedByProgram.version(), actorId, metadata);
+
+        var referencedByArtwork = courseService.createCourse(new CourseWrite(
+                "HAS_ARTWORK", "작품에 연결된 과정", null, null, null, null, 50, true, null),
+                actorId, UUID.randomUUID(), metadata);
+        jdbcTemplate.update("insert into gallery_artwork (id, artwork_id, revision, course_id, created_by) values (?, ?, 1, ?, ?)",
+                UUID.randomUUID(), UUID.randomUUID(), referencedByArtwork.id(), actorId);
+        assertCourseDeleteBlocked(referencedByArtwork.id(), referencedByArtwork.version(), actorId, metadata);
+    }
+
+    private void assertCourseDeleteBlocked(UUID courseId, long version, UUID actorId,
+            CourseService.RequestMetadata metadata) {
+        assertThatThrownBy(() -> courseService.deleteCourse(
+                courseId, version, actorId, UUID.randomUUID(), metadata))
+                .isInstanceOf(CourseException.class)
+                .extracting("code").isEqualTo("COURSE_REFERENCED");
+    }
+
     @AfterAll
     void stopPostgres() throws IOException {
         POSTGRES.close();

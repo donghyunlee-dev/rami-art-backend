@@ -197,9 +197,31 @@ public class JdbcCourseRepository implements CourseRepository {
     }
 
     @Override
+    public Optional<CourseDeletionState> lockCourseForDeletion(UUID courseId) {
+        return jdbcClient.sql("""
+                        select c.code, c.version,
+                               exists(select 1 from class_group g where g.course_id = c.id)
+                               or exists(select 1 from inquiry i where i.interested_course_id = c.id)
+                               or exists(select 1 from gallery_artwork a where a.course_id = c.id)
+                               or exists(select 1 from class_program p where p.course_id = c.id) referenced
+                        from course c where c.id = :id for update of c
+                        """)
+                .param("id", courseId)
+                .query((rs, rowNum) -> new CourseDeletionState(
+                        rs.getString("code"), rs.getLong("version"), rs.getBoolean("referenced")))
+                .optional();
+    }
+
+    @Override
     public int deleteDraftClassGroup(UUID classGroupId, long version) {
         return jdbcClient.sql("delete from class_group where id = :id and status = 'DRAFT' and version = :version")
                 .param("id", classGroupId).param("version", version).update();
+    }
+
+    @Override
+    public int deleteCourse(UUID courseId, long version) {
+        return jdbcClient.sql("delete from course where id = :id and version = :version")
+                .param("id", courseId).param("version", version).update();
     }
 
     @Override

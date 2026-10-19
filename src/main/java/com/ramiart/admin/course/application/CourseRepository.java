@@ -18,6 +18,9 @@ public interface CourseRepository {
     record ClassGroupDeletionState(String status, long version, boolean referenced) {
     }
 
+    record CourseDeletionState(String code, long version, boolean referenced) {
+    }
+
     CoursePage findCourses(String keyword, Boolean active, int page, int size);
 
     Optional<CourseDetail> findCourse(UUID courseId);
@@ -36,7 +39,11 @@ public interface CourseRepository {
 
     Optional<ClassGroupDeletionState> lockClassGroupForDeletion(UUID classGroupId);
 
+    Optional<CourseDeletionState> lockCourseForDeletion(UUID courseId);
+
     int deleteDraftClassGroup(UUID classGroupId, long version);
+
+    int deleteCourse(UUID courseId, long version);
 
     int findMaximumFutureOccupancy(UUID classGroupId);
 

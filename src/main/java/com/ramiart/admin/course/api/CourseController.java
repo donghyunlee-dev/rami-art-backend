@@ -70,6 +70,15 @@ public class CourseController {
         return ok(service.updateCourse(courseId, body, actor(authentication), idempotencyKey, metadata(request)), request);
     }
 
+    @DeleteMapping("/courses/{courseId}")
+    ResponseEntity<Void> deleteCourse(
+            @PathVariable UUID courseId, @RequestParam long version,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey,
+            Authentication authentication, HttpServletRequest request) {
+        service.deleteCourse(courseId, version, actor(authentication), idempotencyKey, metadata(request));
+        return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+    }
+
     @PostMapping("/courses/{courseId}/class-groups")
     ResponseEntity<ApiEnvelope<ClassGroupView>> createClassGroup(
             @PathVariable UUID courseId, @RequestHeader("Idempotency-Key") UUID idempotencyKey,
