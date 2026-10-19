@@ -22,7 +22,7 @@ import org.springframework.stereotype.Repository;
 public class JdbcCourseRepository implements CourseRepository {
 
     private static final String COURSE_FILTER = """
-            where (cast(:keyword as text) is null or c.code ilike '%' || cast(:keyword as text) || '%' or c.name ilike '%' || cast(:keyword as text) || '%')
+            where (cast(:keyword as text) is null or c.name ilike '%' || cast(:keyword as text) || '%')
               and (cast(:active as boolean) is null or c.active = cast(:active as boolean))
             """;
 

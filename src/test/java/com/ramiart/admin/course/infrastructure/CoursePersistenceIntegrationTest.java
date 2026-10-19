@@ -88,6 +88,21 @@ class CoursePersistenceIntegrationTest {
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("supabase/seed.sql"));
     }
 
+    @Test
+    void courseKeywordSearchMatchesNameButNotGeneratedCode() {
+        UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
+        var metadata = new CourseService.RequestMetadata("req_course_search", "127.0.0.1", "integration-test");
+        var created = courseService.createCourse(new CourseWrite(
+                "COURSE_ABC12345", "초등 미술", "", "초등학생", null, null, 10, true, null),
+                actorId, UUID.randomUUID(), metadata);
+
+        var nameMatch = courseService.findCourses("초등", null, 0, 100);
+        var codeMatch = courseService.findCourses("ABC12345", null, 0, 100);
+
+        assertThat(nameMatch.content()).extracting("id").contains(created.id());
+        assertThat(codeMatch.content()).extracting("id").doesNotContain(created.id());
+    }
+
     @AfterAll
     void stopPostgres() throws IOException {
         POSTGRES.close();
