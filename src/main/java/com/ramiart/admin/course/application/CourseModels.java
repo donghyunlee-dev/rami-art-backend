@@ -39,7 +39,7 @@ public final class CourseModels {
     }
 
     public record ClassGroupWrite(
-            String code, String name, String roomCode, int capacity, boolean waitlistEnabled,
+            String name, String roomCode, int capacity, boolean waitlistEnabled,
             int makeupValidDays, LocalDate startsOn, LocalDate endsOn, String status, Long version) {
     }
 

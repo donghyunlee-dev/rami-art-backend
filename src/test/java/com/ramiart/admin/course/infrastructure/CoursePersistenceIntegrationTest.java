@@ -104,6 +104,30 @@ class CoursePersistenceIntegrationTest {
     }
 
     @Test
+    void classGroupCodeIsGeneratedFromIdAndIdempotentCreateReturnsSameGroup() {
+        UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
+        var metadata = new CourseService.RequestMetadata("req_group_code", "127.0.0.1", "integration-test");
+        var course = courseService.createCourse(new CourseWrite(
+                "GROUP_CODE_COURSE", "코드 생성 과정", null, null, null, null, 10, true, null),
+                actorId, UUID.randomUUID(), metadata);
+        var command = new ClassGroupWrite("자동 코드 반", "ROOM_A", 8, true, 30,
+                LocalDate.now(), null, "DRAFT", null);
+        UUID createKey = UUID.randomUUID();
+
+        var created = courseService.createClassGroup(course.id(), command, actorId, createKey, metadata);
+        var replayed = courseService.createClassGroup(course.id(), command, actorId, createKey, metadata);
+
+        assertThat(created.code()).matches("GROUP_[0-9A-F]{24}");
+        assertThat(created.code()).isEqualTo("GROUP_" + created.id().toString().replace("-", "")
+                .substring(0, 24).toUpperCase(java.util.Locale.ROOT));
+        assertThat(replayed.id()).isEqualTo(created.id());
+        assertThat(replayed.code()).isEqualTo(created.code());
+        assertThat(jdbcTemplate.queryForObject("select count(*) from class_group", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_log where action = 'CLASS_GROUP_CREATED'", Integer.class)).isOne();
+    }
+
+    @Test
     void courseCanBeDeletedOnlyWhenItHasNoClassOrOtherReferences() {
         UUID actorId = jdbcTemplate.queryForObject("select id from admin_user", UUID.class);
         var metadata = new CourseService.RequestMetadata("req_course_delete", "127.0.0.1", "integration-test");
@@ -123,7 +147,7 @@ class CoursePersistenceIntegrationTest {
                 "HAS_GROUP", "반이 있는 과정", null, null, null, null, 20, true, null),
                 actorId, UUID.randomUUID(), metadata);
         courseService.createClassGroup(referencedByGroup.id(), new ClassGroupWrite(
-                "HAS_GROUP_A", "준비 반", "ROOM_A", 8, true, 30,
+                "준비 반", "ROOM_A", 8, true, 30,
                 LocalDate.now(), null, "DRAFT", null), actorId, UUID.randomUUID(), metadata);
         assertCourseDeleteBlocked(referencedByGroup.id(), referencedByGroup.version(), actorId, metadata);
 
@@ -181,7 +205,7 @@ class CoursePersistenceIntegrationTest {
                 "select count(*) from audit_log where action = 'COURSE_CREATED'", Integer.class)).isOne();
 
         var group = courseService.createClassGroup(created.id(), new ClassGroupWrite(
-                "DRAWING_A", "드로잉 A", "ROOM_A", 8, true, 30,
+                "드로잉 A", "ROOM_A", 8, true, 30,
                 LocalDate.now(), null, "ACTIVE", null), actorId, UUID.randomUUID(), metadata);
         assertThat(group.availableSeats()).isEqualTo(8);
         var occupancy = courseService.findOccupancy(group.id(), LocalDate.now(), LocalDate.now().plusDays(30));
@@ -196,19 +220,20 @@ class CoursePersistenceIntegrationTest {
                 .extracting("code").isEqualTo("COURSE_HAS_ACTIVE_GROUPS");
 
         var updated = courseService.updateClassGroup(group.id(), new ClassGroupWrite(
-                group.code(), "드로잉 심화 A", group.roomCode(), group.capacity(), group.waitlistEnabled(),
+                "드로잉 심화 A", group.roomCode(), group.capacity(), group.waitlistEnabled(),
                 group.makeupValidDays(), group.startsOn(), group.endsOn(), group.status(), group.version()),
                 actorId, UUID.randomUUID(), metadata);
         assertThat(updated.version()).isEqualTo(1);
+        assertThat(updated.code()).isEqualTo(group.code());
         assertThatThrownBy(() -> courseService.updateClassGroup(group.id(), new ClassGroupWrite(
-                group.code(), "동시 수정", group.roomCode(), group.capacity(), group.waitlistEnabled(),
+                "동시 수정", group.roomCode(), group.capacity(), group.waitlistEnabled(),
                 group.makeupValidDays(), group.startsOn(), group.endsOn(), group.status(), group.version()),
                 actorId, UUID.randomUUID(), metadata))
                 .isInstanceOf(CourseException.class)
                 .extracting("code").isEqualTo("COURSE_VERSION_CONFLICT");
 
         var deletable = courseService.createClassGroup(created.id(), new ClassGroupWrite(
-                "DRAWING_DRAFT", "삭제할 준비반", "ROOM_B", 6, true, 30,
+                "삭제할 준비반", "ROOM_B", 6, true, 30,
                 LocalDate.now(), null, "DRAFT", null), actorId, UUID.randomUUID(), metadata);
         UUID deleteKey = UUID.randomUUID();
         courseService.deleteClassGroup(deletable.id(), deletable.version(), actorId, deleteKey, metadata);
@@ -219,7 +244,7 @@ class CoursePersistenceIntegrationTest {
                 "select count(*) from class_group where id = ?", Integer.class, deletable.id())).isZero();
 
         var referenced = courseService.createClassGroup(created.id(), new ClassGroupWrite(
-                "DRAWING_REF", "참조된 준비반", "ROOM_C", 6, true, 30,
+                "참조된 준비반", "ROOM_C", 6, true, 30,
                 LocalDate.now(), null, "DRAFT", null), actorId, UUID.randomUUID(), metadata);
         jdbcTemplate.update("insert into schedule_slot (id, class_group_id, created_by) values (?, ?, ?)",
                 UUID.randomUUID(), referenced.id(), actorId);
@@ -241,7 +266,7 @@ class CoursePersistenceIntegrationTest {
                 new CourseWrite("PAINTING", "회화", null, null, null, null, 30, true, null),
                 actorId, UUID.randomUUID(), metadata);
         var group = courseService.createClassGroup(course.id(), new ClassGroupWrite(
-                "PAINTING_A", "회화 A", "ROOM_A", 4, true, 30,
+                "회화 A", "ROOM_A", 4, true, 30,
                 LocalDate.now(), null, "ACTIVE", null), actorId, UUID.randomUUID(), metadata);
 
         LocalDate originDate = LocalDate.now().plusMonths(1).withDayOfMonth(10);
@@ -290,13 +315,13 @@ class CoursePersistenceIntegrationTest {
         assertThat(occupancy.availableSeats()).isOne();
 
         assertThatThrownBy(() -> courseService.updateClassGroup(group.id(), new ClassGroupWrite(
-                group.code(), group.name(), group.roomCode(), 2, group.waitlistEnabled(),
+                group.name(), group.roomCode(), 2, group.waitlistEnabled(),
                 group.makeupValidDays(), group.startsOn(), group.endsOn(), group.status(), group.version()),
                 actorId, UUID.randomUUID(), metadata))
                 .isInstanceOf(CourseException.class)
                 .extracting("code").isEqualTo("CLASS_CAPACITY_BELOW_OCCUPANCY");
         var resized = courseService.updateClassGroup(group.id(), new ClassGroupWrite(
-                group.code(), group.name(), group.roomCode(), 3, group.waitlistEnabled(),
+                group.name(), group.roomCode(), 3, group.waitlistEnabled(),
                 group.makeupValidDays(), group.startsOn(), group.endsOn(), group.status(), group.version()),
                 actorId, UUID.randomUUID(), metadata);
         assertThat(resized.capacity()).isEqualTo(3);

@@ -100,11 +100,11 @@ public class CourseService {
         var claim = repository.claim(scope, idempotencyKey, hash(command));
         if (!claim.claimed()) return repository.findClassGroup(claim.resourceId())
                 .orElseThrow(() -> new CourseException("CLASS_GROUP_NOT_FOUND"));
-        if (repository.classGroupCodeExists(command.code(), null)) throw new CourseException("COURSE_CODE_DUPLICATED");
         UUID id = UUID.randomUUID();
-        repository.insertClassGroup(id, courseId, command, actorId);
+        String code = "GROUP_" + id.toString().replace("-", "").substring(0, 24).toUpperCase(Locale.ROOT);
+        repository.insertClassGroup(id, courseId, code, command, actorId);
         audit(actorId, metadata, "CLASS_GROUP_CREATED", "CLASS_GROUP", id,
-                Map.of("courseId", courseId, "code", command.code()));
+                Map.of("courseId", courseId, "code", code));
         repository.complete(scope, idempotencyKey, id, 201);
         return repository.findClassGroup(id).orElseThrow(() -> new CourseException("CLASS_GROUP_NOT_FOUND"));
     }
@@ -121,7 +121,6 @@ public class CourseService {
                 .orElseThrow(() -> new CourseException("CLASS_GROUP_NOT_FOUND"));
         ClassGroupView current = repository.findClassGroup(id)
                 .orElseThrow(() -> new CourseException("CLASS_GROUP_NOT_FOUND"));
-        if (repository.classGroupCodeExists(command.code(), id)) throw new CourseException("COURSE_CODE_DUPLICATED");
         int maximumFutureOccupancy = repository.findMaximumFutureOccupancy(id);
         if (command.capacity() < maximumFutureOccupancy) {
             throw new CourseException("CLASS_CAPACITY_BELOW_OCCUPANCY");
@@ -130,7 +129,7 @@ public class CourseService {
             throw new CourseException("COURSE_VERSION_CONFLICT");
         }
         audit(actorId, metadata, "CLASS_GROUP_UPDATED", "CLASS_GROUP", id,
-                Map.of("code", command.code(), "previousVersion", command.version()));
+                Map.of("code", current.code(), "previousVersion", command.version()));
         repository.complete(scope, idempotencyKey, id, 200);
         return repository.findClassGroup(id).orElseThrow(() -> new CourseException("CLASS_GROUP_NOT_FOUND"));
     }
@@ -190,7 +189,7 @@ public class CourseService {
     }
 
     private static ClassGroupWrite normalize(ClassGroupWrite value) {
-        return new ClassGroupWrite(upper(value.code()), trim(value.name()), upper(value.roomCode()), value.capacity(),
+        return new ClassGroupWrite(trim(value.name()), upper(value.roomCode()), value.capacity(),
                 value.waitlistEnabled(), value.makeupValidDays(), value.startsOn(), value.endsOn(),
                 upper(value.status()), value.version());
     }
@@ -210,8 +209,7 @@ public class CourseService {
     }
 
     private static void validateClassGroup(ClassGroupWrite value, boolean update) {
-        if (value.code() == null || !value.code().matches("^[A-Z][A-Z0-9_]{1,29}$")
-                || value.name() == null || value.name().isBlank() || value.name().length() > 100
+        if (value.name() == null || value.name().isBlank() || value.name().length() > 100
                 || value.roomCode() == null || value.roomCode().isBlank() || value.roomCode().length() > 30
                 || value.capacity() < 1 || value.capacity() > 100
                 || value.makeupValidDays() < 0 || value.makeupValidDays() > 180

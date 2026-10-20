@@ -142,7 +142,7 @@ public class JdbcCourseRepository implements CourseRepository {
     }
 
     @Override
-    public void insertClassGroup(UUID id, UUID courseId, ClassGroupWrite command, UUID actorId) {
+    public void insertClassGroup(UUID id, UUID courseId, String code, ClassGroupWrite command, UUID actorId) {
         jdbcClient.sql("""
                         insert into class_group (
                             id, course_id, code, name, room_code, capacity, waitlist_enabled,
@@ -152,7 +152,7 @@ public class JdbcCourseRepository implements CourseRepository {
                             :makeup_valid_days, :starts_on, :ends_on, :status, :actor_id, :actor_id
                         )
                         """)
-                .param("id", id).param("course_id", courseId).param("code", command.code())
+                .param("id", id).param("course_id", courseId).param("code", code)
                 .param("name", command.name()).param("room_code", command.roomCode())
                 .param("capacity", command.capacity()).param("waitlist_enabled", command.waitlistEnabled())
                 .param("makeup_valid_days", command.makeupValidDays()).param("starts_on", command.startsOn())
@@ -163,13 +163,13 @@ public class JdbcCourseRepository implements CourseRepository {
     @Override
     public int updateClassGroup(UUID id, ClassGroupWrite command, UUID actorId) {
         return jdbcClient.sql("""
-                        update class_group set code = :code, name = :name, room_code = :room_code,
+                        update class_group set name = :name, room_code = :room_code,
                             capacity = :capacity, waitlist_enabled = :waitlist_enabled,
                             makeup_valid_days = :makeup_valid_days, starts_on = :starts_on,
                             ends_on = :ends_on, status = :status, version = version + 1, updated_by = :actor_id
                         where id = :id and version = :version
                         """)
-                .param("id", id).param("code", command.code()).param("name", command.name())
+                .param("id", id).param("name", command.name())
                 .param("room_code", command.roomCode()).param("capacity", command.capacity())
                 .param("waitlist_enabled", command.waitlistEnabled()).param("makeup_valid_days", command.makeupValidDays())
                 .param("starts_on", command.startsOn()).param("ends_on", command.endsOn())

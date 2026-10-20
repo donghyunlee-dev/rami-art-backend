@@ -33,7 +33,7 @@ public interface CourseRepository {
 
     int updateCourse(UUID id, CourseWrite command, UUID actorId);
 
-    void insertClassGroup(UUID id, UUID courseId, ClassGroupWrite command, UUID actorId);
+    void insertClassGroup(UUID id, UUID courseId, String code, ClassGroupWrite command, UUID actorId);
 
     int updateClassGroup(UUID id, ClassGroupWrite command, UUID actorId);
 
