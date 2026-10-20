@@ -1,6 +1,7 @@
 package com.ramiart.admin.course.application;
 
 import com.ramiart.admin.course.application.CourseModels.ClassGroupView;
+import com.ramiart.admin.course.application.CourseModels.ClassGroupPage;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupWrite;
 import com.ramiart.admin.course.application.CourseModels.CourseDetail;
 import com.ramiart.admin.course.application.CourseModels.CoursePage;
@@ -22,6 +23,8 @@ public interface CourseRepository {
     }
 
     CoursePage findCourses(String keyword, Boolean active, int page, int size);
+
+    ClassGroupPage findClassGroups(UUID courseId, String keyword, String status, int page, int size);
 
     Optional<CourseDetail> findCourse(UUID courseId);
 

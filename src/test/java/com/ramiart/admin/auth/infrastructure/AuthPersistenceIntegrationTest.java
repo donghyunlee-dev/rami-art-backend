@@ -18,11 +18,13 @@ import com.ramiart.admin.datatransfer.application.DataTransferStorage;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -310,6 +312,54 @@ class AuthPersistenceIntegrationTest {
         String missingGroup = "/api/admin/class-groups/30000000-0000-0000-0000-000000000099?version=0";
         assertThat(httpWithIdempotency("DELETE", missingGroup, operatorCookie, "").statusCode()).isEqualTo(404);
         assertThat(httpWithIdempotency("DELETE", missingGroup, contentCookie, "").statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void classGroupListFiltersPaginatesAndRequiresCourseReadPermission() throws Exception {
+        createRoleUser("OPERATOR", "operator@class-group-list.rami.local");
+        createRoleUser("CONTENT", "content@class-group-list.rami.local");
+        String operatorCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "operator@class-group-list.rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_group_list_operator")).rawToken();
+        String contentCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "content@class-group-list.rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_group_list_content")).rawToken();
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email = ?",
+                UUID.class, OWNER_EMAIL);
+        UUID courseId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID activeId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into course(id, code, name, display_order, active, created_by, updated_by)
+                values (?, 'LIST_COURSE', '목록 과정', 10, true, ?, ?)
+                """, courseId, actor, actor);
+        jdbcTemplate.update("""
+                insert into class_group(id, course_id, code, name, room_code, capacity, makeup_valid_days,
+                    starts_on, status, created_by, updated_by)
+                values (?, ?, 'LIST_TARGET', '한글 검색 반', 'ROOM_A', 8, 30, current_date, 'DRAFT', ?, ?),
+                       (?, ?, 'LIST_OTHER', '다른 이름 반', 'ROOM_B', 8, 30, current_date, 'DRAFT', ?, ?),
+                       (?, ?, 'LIST_ACTIVE', '한글 운영 반', 'ROOM_C', 8, 30, current_date, 'ACTIVE', ?, ?)
+                """, targetId, courseId, actor, actor, otherId, courseId, actor, actor, activeId, courseId, actor, actor);
+
+        String keyword = URLEncoder.encode("한글", StandardCharsets.UTF_8);
+        var filtered = http("GET", "/api/admin/class-groups?courseId=" + courseId
+                + "&keyword=" + keyword + "&status=DRAFT&page=0&size=1", operatorCookie, null, null);
+        assertThat(filtered.statusCode()).as(filtered.body()).isEqualTo(200);
+        assertThat(filtered.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(filtered.body()).contains("한글 검색 반", "목록 과정");
+        assertThat(filtered.body()).contains("\"regularOccupancy\":0", "\"availableSeats\":8", "\"DELETE\"");
+        assertThat(responseData(filtered.body()).path("totalElements").asInt()).isEqualTo(1);
+        assertThat(responseData(filtered.body()).path("page").asInt()).isZero();
+        assertThat(filtered.body()).doesNotContain("다른 이름 반");
+
+        var secondPage = http("GET", "/api/admin/class-groups?courseId=" + courseId
+                + "&keyword=" + keyword + "&status=DRAFT&page=1&size=1", operatorCookie, null, null);
+        assertThat(secondPage.statusCode()).as(secondPage.body()).isEqualTo(200);
+        assertThat(responseData(secondPage.body()).path("content").size()).isZero();
+        assertThat(responseData(secondPage.body()).path("totalElements").asInt()).isEqualTo(1);
+        assertThat(http("GET", "/api/admin/class-groups", contentCookie, null, null).statusCode()).isEqualTo(403);
+        assertThat(http("GET", "/api/admin/class-groups", null, null, null).statusCode()).isEqualTo(401);
     }
 
     @Test

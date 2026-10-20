@@ -12,6 +12,16 @@ public final class CourseModels {
     public record CoursePage(List<CourseSummary> content, long totalElements, int page, int size) {
     }
 
+    public record ClassGroupPage(List<ClassGroupSummary> content, long totalElements, int page, int size) {
+    }
+
+    public record ClassGroupSummary(
+            UUID id, UUID courseId, String courseName, String name, String roomCode, int capacity,
+            boolean waitlistEnabled, int makeupValidDays, LocalDate startsOn, LocalDate endsOn,
+            String status, long version, int regularOccupancy, int reservedMakeupCount,
+            int availableSeats, List<String> actions) {
+    }
+
     public record CourseSummary(
             UUID id, String code, String name, String description, String ageGuide,
             Integer sessionDurationMinutes, Integer weeklySessions,

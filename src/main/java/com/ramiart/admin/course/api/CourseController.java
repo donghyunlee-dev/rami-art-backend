@@ -3,6 +3,7 @@ package com.ramiart.admin.course.api;
 import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupView;
+import com.ramiart.admin.course.application.CourseModels.ClassGroupPage;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupWrite;
 import com.ramiart.admin.course.application.CourseModels.CourseDetail;
 import com.ramiart.admin.course.application.CourseModels.CoursePage;
@@ -52,6 +53,17 @@ public class CourseController {
     @GetMapping("/courses/{courseId}")
     ResponseEntity<ApiEnvelope<CourseDetail>> detail(@PathVariable UUID courseId, HttpServletRequest request) {
         return ok(service.findCourse(courseId), request);
+    }
+
+    @GetMapping("/class-groups")
+    ResponseEntity<ApiEnvelope<ClassGroupPage>> listClassGroups(
+            @RequestParam(required = false) UUID courseId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest request) {
+        return ok(service.findClassGroups(courseId, keyword, status, page, size), request);
     }
 
     @PostMapping("/courses")

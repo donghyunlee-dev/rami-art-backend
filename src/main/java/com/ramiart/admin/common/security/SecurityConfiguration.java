@@ -246,7 +246,8 @@ public class SecurityConfiguration {
                                 .hasAuthority("GALLERY_PUBLISH")
                         .requestMatchers(HttpMethod.GET, "/api/public/gallery-artworks").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/courses", "/api/admin/courses/**",
-                                "/api/admin/class-groups/*/occupancy").hasAuthority("COURSE_READ")
+                                "/api/admin/class-groups", "/api/admin/class-groups/*/occupancy")
+                                .hasAuthority("COURSE_READ")
                         .requestMatchers(HttpMethod.POST, "/api/admin/courses", "/api/admin/courses/*/class-groups")
                                 .hasAuthority("COURSE_WRITE")
                         .requestMatchers(HttpMethod.PUT, "/api/admin/courses/*", "/api/admin/class-groups/*")

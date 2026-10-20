@@ -3,6 +3,7 @@ package com.ramiart.admin.course.application;
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupView;
+import com.ramiart.admin.course.application.CourseModels.ClassGroupPage;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupWrite;
 import com.ramiart.admin.course.application.CourseModels.CourseDetail;
 import com.ramiart.admin.course.application.CourseModels.CoursePage;
@@ -36,6 +37,18 @@ public class CourseService {
     public CoursePage findCourses(String keyword, Boolean active, int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new CourseException("COURSE_QUERY_INVALID");
         return repository.findCourses(trimToNull(keyword), active, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public ClassGroupPage findClassGroups(UUID courseId, String keyword, String status, int page, int size) {
+        String normalizedStatus = status == null || status.isBlank() ? null : status.trim().toUpperCase(Locale.ROOT);
+        String normalizedKeyword = trimToNull(keyword);
+        if (page < 0 || size < 1 || size > 100
+                || (normalizedStatus != null && !normalizedStatus.matches("DRAFT|ACTIVE|CLOSED"))
+                || (normalizedKeyword != null && normalizedKeyword.length() > 100)) {
+            throw new CourseException("COURSE_QUERY_INVALID");
+        }
+        return repository.findClassGroups(courseId, normalizedKeyword, normalizedStatus, page, size);
     }
 
     @Transactional(readOnly = true)

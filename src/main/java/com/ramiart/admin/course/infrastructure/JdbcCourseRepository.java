@@ -1,6 +1,8 @@
 package com.ramiart.admin.course.infrastructure;
 
 import com.ramiart.admin.course.application.CourseModels.ClassGroupView;
+import com.ramiart.admin.course.application.CourseModels.ClassGroupPage;
+import com.ramiart.admin.course.application.CourseModels.ClassGroupSummary;
 import com.ramiart.admin.course.application.CourseModels.ClassGroupWrite;
 import com.ramiart.admin.course.application.CourseModels.CourseDetail;
 import com.ramiart.admin.course.application.CourseModels.CoursePage;
@@ -24,6 +26,12 @@ public class JdbcCourseRepository implements CourseRepository {
     private static final String COURSE_FILTER = """
             where (cast(:keyword as text) is null or c.name ilike '%' || cast(:keyword as text) || '%')
               and (cast(:active as boolean) is null or c.active = cast(:active as boolean))
+            """;
+
+    private static final String CLASS_GROUP_FILTER = """
+            where (cast(:course_id as uuid) is null or g.course_id = cast(:course_id as uuid))
+              and (cast(:keyword as text) is null or g.name ilike '%' || cast(:keyword as text) || '%')
+              and (cast(:status as text) is null or g.status = cast(:status as text))
             """;
 
     private final JdbcClient jdbcClient;
@@ -51,6 +59,27 @@ public class JdbcCourseRepository implements CourseRepository {
                 .param("keyword", keyword).param("active", active).param("size", size).param("offset", page * size)
                 .query(this::mapSummary).list();
         return new CoursePage(content, total, page, size);
+    }
+
+    @Override
+    public ClassGroupPage findClassGroups(UUID courseId, String keyword, String status, int page, int size) {
+        long total = jdbcClient.sql("select count(*) from class_group g " + CLASS_GROUP_FILTER)
+                .param("course_id", courseId).param("keyword", keyword).param("status", status)
+                .query(Long.class).single();
+        List<ClassGroupSummary> content = jdbcClient.sql("""
+                        select g.*, c.name course_name
+                        from (
+                        """ + classGroupSelect() + """
+                        ) g
+                        join course c on c.id = g.course_id
+                        """ + CLASS_GROUP_FILTER + """
+                        order by c.display_order, g.name, g.id
+                        limit :size offset :offset
+                        """)
+                .param("course_id", courseId).param("keyword", keyword).param("status", status)
+                .param("size", size).param("offset", page * size)
+                .query(this::mapClassGroupSummary).list();
+        return new ClassGroupPage(content, total, page, size);
     }
 
     @Override
@@ -338,11 +367,7 @@ public class JdbcCourseRepository implements CourseRepository {
         int makeup = rs.getInt("reserved_makeup_count");
         String status = rs.getString("status");
         boolean referenced = rs.getBoolean("referenced");
-        List<String> actions = switch (status) {
-            case "DRAFT" -> referenced ? List.of("EDIT") : List.of("EDIT", "DELETE");
-            case "ACTIVE" -> List.of("EDIT", "CLOSE");
-            default -> List.of("VIEW");
-        };
+        List<String> actions = classGroupActions(status, referenced);
         return new ClassGroupView(rs.getObject("id", UUID.class), rs.getObject("course_id", UUID.class),
                 rs.getString("code"), rs.getString("name"), rs.getString("room_code"), capacity,
                 rs.getBoolean("waitlist_enabled"), rs.getInt("makeup_valid_days"),
@@ -350,6 +375,27 @@ public class JdbcCourseRepository implements CourseRepository {
                 status, rs.getLong("version"), regular, makeup, Math.max(0, capacity - regular - makeup),
                 rs.getInt("future_slot_count"), rs.getInt("future_assignment_count"),
                 rs.getString("current_lead_staff"), actions);
+    }
+
+    private ClassGroupSummary mapClassGroupSummary(ResultSet rs, int rowNum) throws SQLException {
+        int regular = rs.getInt("regular_occupancy");
+        int makeup = rs.getInt("reserved_makeup_count");
+        String status = rs.getString("status");
+        return new ClassGroupSummary(rs.getObject("id", UUID.class), rs.getObject("course_id", UUID.class),
+                rs.getString("course_name"), rs.getString("name"), rs.getString("room_code"),
+                rs.getInt("capacity"), rs.getBoolean("waitlist_enabled"), rs.getInt("makeup_valid_days"),
+                rs.getObject("starts_on", java.time.LocalDate.class), rs.getObject("ends_on", java.time.LocalDate.class),
+                status, rs.getLong("version"), regular, makeup,
+                Math.max(0, rs.getInt("capacity") - regular - makeup),
+                classGroupActions(status, rs.getBoolean("referenced")));
+    }
+
+    private static List<String> classGroupActions(String status, boolean referenced) {
+        return switch (status) {
+            case "DRAFT" -> referenced ? List.of("EDIT") : List.of("EDIT", "DELETE");
+            case "ACTIVE" -> List.of("EDIT", "CLOSE");
+            default -> List.of("VIEW");
+        };
     }
 
     private static String classGroupSelect() {
