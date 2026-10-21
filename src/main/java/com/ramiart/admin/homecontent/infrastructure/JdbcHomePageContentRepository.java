@@ -219,15 +219,16 @@ public class JdbcHomePageContentRepository implements HomePageContentRepository 
         int inserted = jdbc.sql("insert into idempotency_record(scope,idempotency_key,request_hash,expires_at) values(:scope,:key,:hash,statement_timestamp()+interval '24 hours') on conflict do nothing")
                 .param("scope",scope).param("key",key).param("hash",hash).update();
         if (inserted == 1) return new Claim(true,null);
-        var existing = jdbc.sql("select request_hash,resource_id from idempotency_record where scope=:scope and idempotency_key=:key")
-                .param("scope",scope).param("key",key).query((rs,row)->new ClaimRow(rs.getString("request_hash"),rs.getObject("resource_id",UUID.class))).optional();
+        var existing = jdbc.sql("select request_hash,state,resource_id from idempotency_record where scope=:scope and idempotency_key=:key")
+                .param("scope",scope).param("key",key).query((rs,row)->new ClaimRow(rs.getString("request_hash"),rs.getString("state"),rs.getObject("resource_id",UUID.class))).optional();
         if (existing.isEmpty() || !hash.equals(existing.get().hash())) throw new HomePageContentException("IDEMPOTENCY_KEY_REUSED");
-        if (existing.get().resourceId() == null) throw new HomePageContentException("IDEMPOTENCY_IN_PROGRESS");
+        if (!"COMPLETED".equals(existing.get().state()) || existing.get().resourceId() == null)
+            throw new HomePageContentException("IDEMPOTENCY_IN_PROGRESS");
         return new Claim(false,existing.get().resourceId());
     }
-    private record ClaimRow(String hash, UUID resourceId) {}
+    private record ClaimRow(String hash, String state, UUID resourceId) {}
     @Override public void complete(String scope, UUID key, UUID resourceId, int status) {
-        jdbc.sql("update idempotency_record set resource_id=:id,response_status=:status,completed_at=statement_timestamp() where scope=:scope and idempotency_key=:key")
+        jdbc.sql("update idempotency_record set state='COMPLETED',resource_id=:id,response_status=:status where scope=:scope and idempotency_key=:key and state='PROCESSING'")
                 .param("id",resourceId).param("status",status).param("scope",scope).param("key",key).update();
     }
 
