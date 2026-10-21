@@ -118,7 +118,7 @@ public class StudioProfileService {
         if (draft.version() != raw.draftVersion()) throw new StudioProfileException("STUDIO_PROFILE_VERSION_CONFLICT");
         Write write = normalize(from(draft));
         validatePublishable(write);
-        repository.publish(id, draft.version(), actor);
+        repository.publish(id, draft.version(), actor, write);
         audit(actor, meta, "STUDIO_PROFILE_PUBLISHED", id, Map.of("revision", draft.revision()));
         repository.complete(scope, key, id, 201);
         return new Mutation<>(publication(repository.findById(id).orElseThrow()), false);
@@ -167,8 +167,9 @@ public class StudioProfileService {
     private static Write normalizeDraft(Write raw) {
         if (raw == null) throw new StudioProfileException("VALIDATION_ERROR");
         String phone = trim(raw.phone());
-        if (phone != null && (phone.matches("0[0-9]{8,10}") || phone.replaceAll("[\\s()-]", "")
-                .matches("\\+[1-9][0-9]{7,14}"))) phone = normalizePhone(phone);
+        String compactPhone = phone == null ? null : phone.replaceAll("[\\s()-]", "");
+        if (compactPhone != null && (compactPhone.matches("0[0-9]{8,10}")
+                || compactPhone.matches("\\+[1-9][0-9]{7,14}"))) phone = normalizePhone(phone);
         String email = trim(raw.email());
         if (email != null) email = email.toLowerCase(Locale.ROOT);
         return new Write(raw.version(), trim(raw.studioName()), phone, email, trim(raw.address()),

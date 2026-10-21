@@ -86,14 +86,28 @@ public class JdbcStudioProfileRepository implements StudioProfileRepository {
         }
     }
 
-    @Override public void publish(UUID id, long version, UUID actor) {
+    @Override public void publish(UUID id, long version, UUID actor, Write profile) {
         jdbc.sql("update studio_profile set status='ARCHIVED' where status='PUBLISHED'").update();
-        int changed = jdbc.sql("""
-                update studio_profile set status='PUBLISHED',published_by=:actor,
-                  published_at=statement_timestamp(),version=version+1
-                where id=:id and status='DRAFT' and version=:version
-                """).param("actor", actor).param("id", id).param("version", version).update();
-        if (changed != 1) throw new StudioProfileException("STUDIO_PROFILE_VERSION_CONFLICT");
+        try {
+            int changed = jdbc.sql("""
+                    update studio_profile set status='PUBLISHED',published_by=:actor,
+                      published_at=statement_timestamp(),studio_name=:name,phone=:phone,email=:email,address=:address,
+                      address_detail=:addressDetail,latitude=:latitude,longitude=:longitude,
+                      business_hours=cast(:hours as jsonb),faqs=cast(:faqs as jsonb),closed_days=:closedDays,
+                      transit_guide=:transitGuide,parking_guide=:parkingGuide,version=version+1
+                    where id=:id and status='DRAFT' and version=:version
+                    """)
+                    .param("actor", actor).param("name", profile.studioName()).param("phone", profile.phone())
+                    .param("email", profile.email()).param("address", profile.address())
+                    .param("addressDetail", profile.addressDetail()).param("latitude", profile.latitude())
+                    .param("longitude", profile.longitude()).param("hours", mapper.writeValueAsString(profile.businessHours()))
+                    .param("faqs", mapper.writeValueAsString(profile.faqs())).param("closedDays", profile.closedDays())
+                    .param("transitGuide", profile.transitGuide()).param("parkingGuide", profile.parkingGuide())
+                    .param("id", id).param("version", version).update();
+            if (changed != 1) throw new StudioProfileException("STUDIO_PROFILE_VERSION_CONFLICT");
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Cannot serialize studio profile for publication", exception);
+        }
     }
 
     @Override public Claim claim(String scope, UUID key, String hash) {

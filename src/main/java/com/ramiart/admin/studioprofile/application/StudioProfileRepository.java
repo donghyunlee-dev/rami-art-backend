@@ -13,7 +13,7 @@ public interface StudioProfileRepository {
     int maxRevision();
     UUID insertDraft(Write write, UUID actor, UUID basedOn);
     int updateDraft(UUID id, Write write);
-    void publish(UUID id, long version, UUID actor);
+    void publish(UUID id, long version, UUID actor, Write normalizedProfile);
     Claim claim(String scope, UUID key, String hash);
     void complete(String scope, UUID key, UUID resourceId, int responseStatus);
 }
