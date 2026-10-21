@@ -582,6 +582,35 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void studioProfileDraftCanBeSavedWhileRequiredHoursAreIncomplete() throws Exception {
+        createRoleUser("OWNER", "studio-profile-draft-owner@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "studio-profile-draft-owner@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_studio_profile_draft_owner")).rawToken();
+        HttpResponse<String> created = httpWithKey("POST", "/api/admin/studio-profile/drafts", cookie, "", UUID.randomUUID());
+        UUID draftId = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body())
+                .path("data").path("draftId").asText());
+
+        String incomplete = """
+                {"version":0,"studioName":"라미아트 테스트","phone":"+821012345678",
+                 "email":"hello@rami-art.example","address":"서울시 강남구 예술로 10",
+                 "addressDetail":null,"latitude":null,"longitude":null,
+                 "businessHours":[{"day":1,"closed":false,"open":null,"close":"19:00"}],
+                 "closedDays":null,"transitGuide":null,"parkingGuide":null,"faqs":[]}
+                """;
+
+        HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/studio-profile/drafts/" + draftId,
+                cookie, incomplete, UUID.randomUUID());
+
+        assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
+        assertThat(saved.body()).contains("\"version\":1", "\"publishable\":false");
+        HttpResponse<String> published = httpWithKey("POST", "/api/admin/studio-profile/publications", cookie,
+                "{\"draftId\":\"" + draftId + "\",\"draftVersion\":1}", UUID.randomUUID());
+        assertThat(published.statusCode()).as(published.body()).isEqualTo(422);
+        assertThat(published.body()).contains("STUDIO_PROFILE_HOURS_INVALID");
+    }
+
+    @Test
     void directorProfileRevisionRoutesKeepHiddenCareersOutOfPublicRead() throws Exception {
         createRoleUser("OWNER", "director-profile-owner@rami.local");
         createRoleUser("OPERATOR", "director-profile-content@rami.local");

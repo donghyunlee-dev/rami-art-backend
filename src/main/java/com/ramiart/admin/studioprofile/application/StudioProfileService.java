@@ -69,8 +69,8 @@ public class StudioProfileService {
     @Transactional
     public Mutation<AdminView> updateDraft(UUID id, Write raw, UUID key, Authentication auth, RequestMetadata meta) {
         UUID actor = require(auth, "CONTENT_PROFILE_WRITE");
-        Write write = normalize(raw);
-        validatePublishable(write);
+        Write write = normalizeDraft(raw);
+        validateDraft(write);
         String scope = actor + ":STUDIO_PROFILE_UPDATE:" + id;
         String hash = digest("PUT:/api/admin/studio-profile/drafts/" + id + ":" + write);
         StudioProfileRepository.Claim claim = repository.claim(scope, key, hash);
@@ -164,6 +164,71 @@ public class StudioProfileService {
                 raw.latitude(), raw.longitude(), businessHours, closedDays, transitGuide, parkingGuide, faqs);
     }
 
+    private static Write normalizeDraft(Write raw) {
+        if (raw == null) throw new StudioProfileException("VALIDATION_ERROR");
+        String phone = trim(raw.phone());
+        if (phone != null && (phone.matches("0[0-9]{8,10}") || phone.replaceAll("[\\s()-]", "")
+                .matches("\\+[1-9][0-9]{7,14}"))) phone = normalizePhone(phone);
+        String email = trim(raw.email());
+        if (email != null) email = email.toLowerCase(Locale.ROOT);
+        return new Write(raw.version(), trim(raw.studioName()), phone, email, trim(raw.address()),
+                optional(raw.addressDetail()), raw.latitude(), raw.longitude(), normalizeDraftHours(raw.businessHours()),
+                optional(raw.closedDays()), optional(raw.transitGuide()), optional(raw.parkingGuide()),
+                normalizeDraftFaqs(raw.faqs()));
+    }
+
+    private static void validateDraft(Write write) {
+        maxLength(write.studioName(), 100, "studioName");
+        maxLength(write.phone(), 32, "phone");
+        maxLength(write.email(), 254, "email");
+        maxLength(write.address(), 200, "address");
+        maxLength(write.addressDetail(), 100, "addressDetail");
+        maxLength(write.closedDays(), 300, "closedDays");
+        maxLength(write.transitGuide(), 500, "transitGuide");
+        maxLength(write.parkingGuide(), 500, "parkingGuide");
+    }
+
+    private static List<BusinessHour> normalizeDraftHours(List<BusinessHour> values) {
+        if (values == null || values.size() > 7) throw new StudioProfileException("STUDIO_PROFILE_HOURS_INVALID", "businessHours");
+        Set<Integer> days = new HashSet<>();
+        List<BusinessHour> result = new ArrayList<>();
+        for (BusinessHour hour : values) {
+            if (hour == null || hour.day() < 1 || hour.day() > 7 || !days.add(hour.day()))
+                throw new StudioProfileException("STUDIO_PROFILE_HOURS_INVALID", "businessHours");
+            if (hour.closed()) {
+                result.add(new BusinessHour(hour.day(), true, null, null));
+            } else {
+                validateDraftTime(hour.open(), hour.day());
+                validateDraftTime(hour.close(), hour.day());
+                result.add(new BusinessHour(hour.day(), false, hour.open(), hour.close()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static void validateDraftTime(String value, int day) {
+        if (value != null && !value.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]"))
+            throw new StudioProfileException("STUDIO_PROFILE_HOURS_INVALID", "businessHours[" + day + "]");
+    }
+
+    private static List<Faq> normalizeDraftFaqs(List<Faq> values) {
+        if (values == null || values.size() > 30) throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+        Set<UUID> ids = new HashSet<>();
+        Set<Integer> orders = new HashSet<>();
+        List<Faq> result = new ArrayList<>();
+        for (Faq faq : values) {
+            if (faq == null || faq.faqId() == null || !ids.add(faq.faqId()) || faq.displayOrder() < 0
+                    || !orders.add(faq.displayOrder())) throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+            String question = faq.question() == null ? "" : faq.question().trim();
+            String answer = faq.answer() == null ? "" : faq.answer().trim();
+            if (question.length() > 200 || answer.length() > 2000)
+                throw new StudioProfileException("VALIDATION_ERROR", "faqs");
+            result.add(new Faq(faq.faqId(), question, answer, faq.displayOrder(), faq.visible()));
+        }
+        result.sort(java.util.Comparator.comparingInt(Faq::displayOrder));
+        return List.copyOf(result);
+    }
+
     private static void validatePublishable(Write write) {
         if (!length(write.studioName(), 1, 100)) throw new StudioProfileException("STUDIO_PROFILE_CONTACT_REQUIRED", "studioName");
         if (write.phone() == null || !write.phone().matches("\\+[1-9][0-9]{7,14}"))
@@ -246,6 +311,9 @@ public class StudioProfileService {
     private static void optionalLength(String value, int max, String field) {
         if (value != null && (value.isBlank() || value.length() > max))
             throw new StudioProfileException("VALIDATION_ERROR", field);
+    }
+    private static void maxLength(String value, int max, String field) {
+        if (value != null && value.length() > max) throw new StudioProfileException("VALIDATION_ERROR", field);
     }
     private static boolean length(String value, int min, int max) { return value != null && value.length() >= min && value.length() <= max; }
     private static String trim(String value) { return value == null ? null : value.trim(); }
