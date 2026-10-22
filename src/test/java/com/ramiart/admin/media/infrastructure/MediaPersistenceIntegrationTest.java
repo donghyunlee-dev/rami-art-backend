@@ -256,7 +256,7 @@ class MediaPersistenceIntegrationTest {
         final Map<String, byte[]> objects = new HashMap<>();
         boolean failWrites;
         boolean failDeletes;
-        @Override public void store(String key, byte[] content) {
+        @Override public void store(String key, byte[] content, String contentType) {
             if (failWrites) throw new MediaException("MEDIA_STORAGE_FAILED");
             objects.put(key, content.clone());
         }
@@ -264,5 +264,6 @@ class MediaPersistenceIntegrationTest {
             if (failDeletes) throw new MediaException("MEDIA_STORAGE_FAILED");
             objects.remove(key);
         }
+        @Override public String publicUrl(String key) { return "/media/" + key.substring("public-media/".length()); }
     }
 }

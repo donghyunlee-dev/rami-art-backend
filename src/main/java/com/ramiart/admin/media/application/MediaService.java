@@ -55,7 +55,7 @@ public final class MediaService {
         UUID assetId = UUID.randomUUID();
         String suffix = extension(image.mimeType());
         String storageKey = "public-media/" + PATH_MONTH.format(clock.instant()) + "/" + assetId + suffix;
-        String publicPath = "/media/" + PATH_MONTH.format(clock.instant()) + "/" + assetId + suffix;
+        String publicPath = storage.publicUrl(storageKey);
         // PostgreSQL timestamps retain microseconds; first and replay responses must match.
         Instant expiresAt = clock.instant().plusSeconds(7 * 24 * 60 * 60L).truncatedTo(ChronoUnit.MICROS);
         StoredAsset candidate = new StoredAsset(assetId, storageKey, publicPath, image.fileName(), image.sha256(),
@@ -66,7 +66,7 @@ public final class MediaService {
                 MediaRepository.IdempotencyClaim claim = repository.claim(scope, idempotencyKey, requestHash);
                 if (!claim.claimed()) return repository.find(claim.resourceId())
                         .orElseThrow(() -> new MediaException("MEDIA_ASSET_NOT_FOUND"));
-                storage.store(storageKey, image.bytes());
+                storage.store(storageKey, image.bytes(), image.mimeType());
                 objectWritten[0] = true;
                 repository.insert(candidate, actorId);
                 recordAudit(actorId, metadata, "MEDIA_ASSET_UPLOADED", assetId,
@@ -128,7 +128,9 @@ public final class MediaService {
     }
 
     private MediaAsset response(StoredAsset asset) {
-        return new MediaAsset(asset.id(), publicBaseUrl + asset.publicPath(), asset.originalFileName(),
+        String url = asset.publicPath().startsWith("http://") || asset.publicPath().startsWith("https://")
+                ? asset.publicPath() : publicBaseUrl + asset.publicPath();
+        return new MediaAsset(asset.id(), url, asset.originalFileName(),
                 asset.mimeType(), asset.fileSize(), asset.width(), asset.height(), "READY", asset.expiresAt());
     }
 

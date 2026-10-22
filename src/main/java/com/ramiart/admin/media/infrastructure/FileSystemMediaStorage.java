@@ -7,9 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnExpression("'${app.storage.supabase-url:}' == '' or '${app.storage.service-key:}' == ''")
 public final class FileSystemMediaStorage implements MediaStorage {
     private final Path root;
 
@@ -18,7 +20,7 @@ public final class FileSystemMediaStorage implements MediaStorage {
     }
 
     @Override
-    public void store(String key, byte[] content) {
+    public void store(String key, byte[] content, String contentType) {
         Path target = resolve(key);
         Path temporary = target.resolveSibling(target.getFileName() + ".part");
         try {
@@ -42,6 +44,13 @@ public final class FileSystemMediaStorage implements MediaStorage {
         } catch (IOException exception) {
             throw new MediaException("MEDIA_STORAGE_FAILED", exception);
         }
+    }
+
+    @Override
+    public String publicUrl(String key) {
+        String prefix = "public-media/";
+        if (!key.startsWith(prefix)) throw new MediaException("MEDIA_STORAGE_FAILED");
+        return "/media/" + key.substring(prefix.length());
     }
 
     private Path resolve(String key) {
