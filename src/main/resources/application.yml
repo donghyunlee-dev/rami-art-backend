@@ -56,7 +56,7 @@ logging:
     root: info
     org:
       springframework:
-        web: debug
+        web: info
     com:
       rami:
         artstudio: debug
