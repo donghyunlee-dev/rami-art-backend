@@ -2,6 +2,7 @@ package com.ramiart.admin.homecontent.application;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import static com.ramiart.admin.homecontent.application.HomePageContentModels.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -25,16 +26,18 @@ public class HomePageContentService {
     private final HomePageContentRepository repository;
     private final AuditRecorder audit;
     private final Clock clock;
+    private final MediaUrlResolver mediaUrls;
 
-    public HomePageContentService(HomePageContentRepository repository, AuditRecorder audit, Clock clock) {
-        this.repository = repository; this.audit = audit; this.clock = clock;
+    public HomePageContentService(HomePageContentRepository repository, AuditRecorder audit, Clock clock,
+            MediaUrlResolver mediaUrls) {
+        this.repository = repository; this.audit = audit; this.clock = clock; this.mediaUrls = mediaUrls;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public AdminView get(Authentication auth) {
         require(auth, "HOME_CONTENT_READ");
-        return new AdminView(repository.findByStatus("PUBLISHED").orElse(null),
-                repository.findByStatus("DRAFT").orElse(null), repository.history());
+        return new AdminView(resolve(repository.findByStatus("PUBLISHED").orElse(null)),
+                resolve(repository.findByStatus("DRAFT").orElse(null)), repository.history());
     }
 
     @Transactional(readOnly = true)
@@ -46,14 +49,14 @@ public class HomePageContentService {
     @Transactional(readOnly = true)
     public RevisionView revision(UUID id, Authentication auth) {
         require(auth, "HOME_CONTENT_READ");
-        return repository.findById(id).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_REVISION_NOT_FOUND"));
+        return resolve(repository.findById(id).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_REVISION_NOT_FOUND")));
     }
 
     @Transactional
     public RevisionView createDraft(UUID sourceRevisionId, UUID actor, UUID key, RequestMetadata meta) {
         String scope = actor + ":HOME_CONTENT_DRAFT_CREATE";
         Claim claim = repository.claim(scope, key, digest("POST:/api/admin/home-page-content/drafts:" + sourceRevisionId));
-        if (!claim.claimed()) return repository.findById(claim.resourceId()).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_REVISION_NOT_FOUND"));
+        if (!claim.claimed()) return resolve(repository.findById(claim.resourceId()).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_REVISION_NOT_FOUND")));
         if (repository.findByStatus("DRAFT").isPresent()) throw new HomePageContentException("HOME_CONTENT_DRAFT_EXISTS");
         RevisionView base = sourceRevisionId == null
                 ? repository.findByStatus("PUBLISHED").orElse(null)
@@ -63,7 +66,7 @@ public class HomePageContentService {
         repository.replaceChildren(id, copy);
         record(actor, meta, "HOME_CONTENT_DRAFT_CREATED", id, Map.of("basedOnRevision", base == null ? 0 : base.revision()));
         repository.complete(scope, key, id, 201);
-        return repository.findById(id).orElseThrow();
+        return resolve(repository.findById(id).orElseThrow());
     }
 
     @Transactional
@@ -72,7 +75,7 @@ public class HomePageContentService {
         validateStructure(write);
         String scope = actor + ":HOME_CONTENT_DRAFT_UPDATE:" + id;
         Claim claim = repository.claim(scope, key, digest("PUT:/api/admin/home-page-content/drafts/" + id + ":" + write));
-        if (!claim.claimed()) return repository.findById(id).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_DRAFT_NOT_FOUND"));
+        if (!claim.claimed()) return resolve(repository.findById(id).orElseThrow(() -> new HomePageContentException("HOME_CONTENT_DRAFT_NOT_FOUND")));
         RevisionView current = repository.findById(id).filter(v -> "DRAFT".equals(v.status()))
                 .orElseThrow(() -> new HomePageContentException("HOME_CONTENT_DRAFT_NOT_FOUND"));
         if (write.version() == null || write.version() != current.version()) throw new HomePageContentException("HOME_CONTENT_VERSION_CONFLICT");
@@ -80,7 +83,7 @@ public class HomePageContentService {
         repository.replaceChildren(id, write);
         record(actor, meta, "HOME_CONTENT_DRAFT_UPDATED", id, Map.of("revision", current.revision()));
         repository.complete(scope, key, id, 200);
-        return repository.findById(id).orElseThrow();
+        return resolve(repository.findById(id).orElseThrow());
     }
 
     @Transactional(readOnly = true)
@@ -90,7 +93,7 @@ public class HomePageContentService {
                 .orElseThrow(() -> new HomePageContentException("HOME_CONTENT_DRAFT_NOT_FOUND"));
         if (draft.version() != version) throw new HomePageContentException("HOME_CONTENT_VERSION_CONFLICT");
         List<ValidationError> errors = validate(draft);
-        return new Preview(draft, errors, errors.isEmpty());
+        return new Preview(resolve(draft), errors, errors.isEmpty());
     }
 
     @Transactional
@@ -115,7 +118,33 @@ public class HomePageContentService {
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PublicView publicContent() {
-        return repository.findPublic().orElseThrow(() -> new HomePageContentException("HOME_CONTENT_PUBLIC_NOT_FOUND"));
+        return resolve(repository.findPublic().orElseThrow(() -> new HomePageContentException("HOME_CONTENT_PUBLIC_NOT_FOUND")));
+    }
+
+    private RevisionView resolve(RevisionView revision) {
+        if (revision == null) return null;
+        Hero hero = revision.hero();
+        Hero resolvedHero = new Hero(hero.title(), hero.description(), hero.mediaAssetId(), mediaUrls.resolve(hero.imageUrl()),
+                hero.altText(), hero.ctaLabel(), hero.ctaTarget());
+        return new RevisionView(revision.id(), revision.revision(), revision.status(), revision.version(), resolvedHero,
+                revision.strengths(), revision.sections(), revision.references(), revision.updatedAt(), revision.publishedAt());
+    }
+
+    private PublicView resolve(PublicView view) {
+        PublicHero hero = view.hero();
+        PublicHero resolvedHero = new PublicHero(hero.title(), hero.description(), mediaUrls.resolve(hero.imageUrl()),
+                hero.altText(), hero.ctaLabel(), hero.href());
+        List<PublicCourse> courses = view.courses().stream().map(item -> new PublicCourse(item.courseId(), item.revision(),
+                item.courseCode(), item.audienceLabel(), item.sessionDurationMinutes(), item.weeklySessions(), item.title(),
+                item.description(), item.activities(), mediaUrls.resolve(item.imageUrl()), item.altText(), item.displayOrder())).toList();
+        List<PublicArtwork> artworks = view.artworks().stream().map(item -> new PublicArtwork(item.artworkId(), item.revision(),
+                item.courseCode(), item.audienceLabel(), item.title(), item.medium(), item.description(),
+                mediaUrls.resolve(item.imageUrl()), item.altText(), item.displayOrder())).toList();
+        List<PublicPost> posts = view.posts().stream().map(item -> new PublicPost(item.postId(), item.revision(), item.title(),
+                item.summary(), item.category(), mediaUrls.resolve(item.imageUrl()), item.altText(), item.publishedAt(),
+                item.displayOrder())).toList();
+        return new PublicView(view.revision(), resolvedHero, view.strengths(), view.sections(), courses, artworks, posts,
+                view.publishedAt());
     }
 
     private List<ValidationError> validate(RevisionView draft) {

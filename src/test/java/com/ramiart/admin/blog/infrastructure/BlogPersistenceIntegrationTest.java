@@ -10,6 +10,7 @@ import com.ramiart.admin.blog.application.BlogModels.Publish;
 import com.ramiart.admin.blog.application.BlogModels.Write;
 import com.ramiart.admin.blog.application.BlogService;
 import com.ramiart.admin.dev.PostgresScriptRunner;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,7 +45,7 @@ class BlogPersistenceIntegrationTest {
     JdbcTemplate jdbc;
 
     @Configuration(proxyBeanMethods=false) @EnableAutoConfiguration
-    @Import({BlogService.class,BlogContentSanitizer.class,JdbcBlogRepository.class,JdbcAuditRecorder.class})
+    @Import({BlogService.class,BlogContentSanitizer.class,JdbcBlogRepository.class,JdbcAuditRecorder.class,MediaUrlResolver.class})
     static class TestConfiguration { @Bean Clock clock() { return Clock.systemUTC(); } }
 
     @DynamicPropertySource static void datasource(DynamicPropertyRegistry registry) {

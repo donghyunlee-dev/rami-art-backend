@@ -2,12 +2,12 @@ package com.ramiart.admin.classprogram.application;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import static com.ramiart.admin.classprogram.application.ClassProgramModels.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.util.*;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -16,9 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ClassProgramService {
     public record RequestMetadata(String requestId,String ipAddress,String userAgent) {}
-    private final ClassProgramRepository repository; private final AuditRecorder audit; private final Clock clock; private final String mediaPublicBaseUrl;
-    public ClassProgramService(ClassProgramRepository repository,AuditRecorder audit,Clock clock,
-            @Value("${admin.media.public-base-url:http://localhost:8080}") String mediaPublicBaseUrl){this.repository=repository;this.audit=audit;this.clock=clock;this.mediaPublicBaseUrl=mediaPublicBaseUrl.replaceAll("/+$","");}
+    private final ClassProgramRepository repository; private final AuditRecorder audit; private final Clock clock; private final MediaUrlResolver mediaUrls;
+    public ClassProgramService(ClassProgramRepository repository,AuditRecorder audit,Clock clock,MediaUrlResolver mediaUrls){this.repository=repository;this.audit=audit;this.clock=clock;this.mediaUrls=mediaUrls;}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public ProgramList list(Authentication auth){require(auth,"CONTENT_PROGRAM_READ"); List<CoursePrograms> rows=repository.findAll();
         List<Stored> visible=rows.stream().filter(CoursePrograms::active).map(CoursePrograms::currentPublished).filter(Objects::nonNull).filter(Stored::visible).toList();
@@ -54,7 +53,7 @@ public class ClassProgramService {
     private ProgramItem itemForCourse(UUID course){return repository.findAll().stream().filter(x->x.id().equals(course)).findFirst().map(this::item).orElseThrow(()->new ClassProgramException("CLASS_PROGRAM_COURSE_NOT_FOUND"));}
     private ProgramItem item(CoursePrograms p){return new ProgramItem(new CourseView(p.id(),p.code(),p.name(),p.audienceLabel(),p.sessionDurationMinutes(),p.weeklySessions(),p.sourceVersion(),p.active()),revision(p.currentPublished()),revision(p.draft()),media(p.draft()!=null?p.draft():p.currentPublished()),List.of("EDIT"));}
     private static ProgramRevision revision(Stored p){return p==null?null:new ProgramRevision(p.id(),p.revision(),p.version(),p.audienceLabel(),p.title(),p.description(),p.activities(),p.sessionDurationMinutes(),p.weeklySessions(),p.mediaAssetId(),p.altText(),p.visible(),p.displayOrder(),p.updatedAt(),p.publishedAt(),p.sourceMatches(),p.sourceMatches()&&!blank(p.audienceLabel())&&p.sessionDurationMinutes()!=null&&p.weeklySessions()!=null&&!blank(p.title())&&!blank(p.description())&&!p.activities().isEmpty()&&p.mediaAssetId()!=null&&!blank(p.altText()));}
-    private Object media(Stored p){if(p==null||p.mediaAssetId()==null)return null;String path=p.imageUrl()==null?"":p.imageUrl();String publicUrl=path.isBlank()?"":path.startsWith("http://")||path.startsWith("https://")?path:mediaPublicBaseUrl+(path.startsWith("/")?"":"/")+path;return Map.of("id",p.mediaAssetId(),"publicUrl",publicUrl,"fileName","","mimeType",p.mimeType()==null?"image/jpeg":p.mimeType(),"fileSize",p.fileSize(),"width",p.width(),"height",p.height(),"status","READY","expiresAt",p.expiresAt()==null?java.time.Instant.EPOCH:p.expiresAt());}
+    private Object media(Stored p){if(p==null||p.mediaAssetId()==null)return null;String publicUrl=mediaUrls.resolve(p.imageUrl());return Map.of("id",p.mediaAssetId(),"publicUrl",publicUrl==null?"":publicUrl,"fileName","","mimeType",p.mimeType()==null?"image/jpeg":p.mimeType(),"fileSize",p.fileSize(),"width",p.width(),"height",p.height(),"status","READY","expiresAt",p.expiresAt()==null?java.time.Instant.EPOCH:p.expiresAt());}
     private static Publication publication(Stored p){return new Publication(p.id(),p.courseId(),p.revision(),p.status(),p.version(),p.publishedAt());}
     private void validate(ProgramWrite w){if(w==null||w.version()==null||w.visible()==null||w.displayOrder()==null||w.displayOrder()<0)throw new ClassProgramException("VALIDATION_ERROR");
         if(length(w.title(),100)||length(w.description(),500)||length(w.altText(),300)||w.activities()==null||w.activities().size()>10||w.activities().stream().anyMatch(a->a==null||a.isBlank()||a.length()>100))throw new ClassProgramException("CLASS_PROGRAM_INCOMPLETE");}

@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -38,7 +39,7 @@ class ClassProgramServiceTest {
                 List.of(new SimpleGrantedAuthority("CONTENT_PROGRAM_READ")));
         var service = new ClassProgramService(repository, mock(AuditRecorder.class),
                 Clock.fixed(Instant.parse("2026-10-22T00:00:00Z"), ZoneOffset.UTC),
-                "https://rami-art-backend.onrender.com/");
+                new MediaUrlResolver("https://rami-art-backend.onrender.com/"));
 
         ProgramItem item = service.list(authentication).items().getFirst();
 

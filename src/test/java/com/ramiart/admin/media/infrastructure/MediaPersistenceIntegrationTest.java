@@ -10,6 +10,7 @@ import com.ramiart.admin.media.application.MediaException;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaService;
 import com.ramiart.admin.media.application.MediaStorage;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -58,7 +59,8 @@ class MediaPersistenceIntegrationTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @Import({MediaService.class, JdbcMediaRepository.class, JdbcConsentRepository.class, SecureImageValidator.class, JdbcAuditRecorder.class})
+    @Import({MediaService.class, JdbcMediaRepository.class, JdbcConsentRepository.class, SecureImageValidator.class,
+            JdbcAuditRecorder.class, MediaUrlResolver.class})
     static class TestConfiguration {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean InMemoryStorage storage() { return new InMemoryStorage(); }

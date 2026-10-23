@@ -2,6 +2,7 @@ package com.ramiart.admin.blog.application;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import com.ramiart.admin.blog.application.BlogModels.*;
 import com.ramiart.admin.blog.application.BlogRepository.Revision;
 import java.nio.charset.StandardCharsets;
@@ -22,8 +23,10 @@ public class BlogService {
     private final BlogContentSanitizer sanitizer;
     private final AuditRecorder audit;
     private final Clock clock;
-    public BlogService(BlogRepository repository, BlogContentSanitizer sanitizer, AuditRecorder audit, Clock clock) {
-        this.repository=repository; this.sanitizer=sanitizer; this.audit=audit; this.clock=clock;
+    private final MediaUrlResolver mediaUrls;
+    public BlogService(BlogRepository repository, BlogContentSanitizer sanitizer, AuditRecorder audit, Clock clock,
+            MediaUrlResolver mediaUrls) {
+        this.repository=repository; this.sanitizer=sanitizer; this.audit=audit; this.clock=clock; this.mediaUrls=mediaUrls;
     }
 
     @Transactional(readOnly=true, isolation=Isolation.REPEATABLE_READ)
@@ -152,7 +155,7 @@ public class BlogService {
         var d=repository.findByPostAndStatus(r.postId(),"DRAFT").orElse(null);
         var p=repository.findByPostAndStatus(r.postId(),"PUBLISHED").orElse(null);
         Revision display=d!=null?d:p!=null?p:r;
-        Thumbnail thumbnail=display.mediaId()==null?null:new Thumbnail(display.mediaId(),display.mediaUrl(),display.altText(),d!=null?"DRAFT":"PUBLISHED");
+        Thumbnail thumbnail=display.mediaId()==null?null:new Thumbnail(display.mediaId(),mediaUrls.resolve(display.mediaUrl()),display.altText(),d!=null?"DRAFT":"PUBLISHED");
         return new Summary(r.postId(),display.title(),display.category(),thumbnail,author(display),
                 p==null?null:new Published(p.id(),p.revision(),p.visible(),p.publishedAt()),
                 d==null?null:new Draft(d.id(),d.revision(),d.updatedAt(),d.version(),publishable(d)),
@@ -167,7 +170,7 @@ public class BlogService {
     private boolean publishable(Revision r) { return r.title()!=null&&r.category()!=null&&(r.visible()
             ?r.summary()!=null&&r.mediaId()!=null&&r.altText()!=null&&r.content()!=null&&!r.content().isBlank()
             :r.content()!=null&&!r.content().isBlank()); }
-    private static Media media(Revision r) { return r.mediaId()==null?null:new Media(r.mediaId(),r.mediaUrl(),r.mediaStatus()); }
+    private Media media(Revision r) { return r.mediaId()==null?null:new Media(r.mediaId(),mediaUrls.resolve(r.mediaUrl()),r.mediaStatus()); }
     private static Author author(Revision r) { return new Author(r.authorId(),r.authorName(),r.authorActive()); }
     private static Created created(Revision r) { return new Created(r.postId(),r.id(),r.revision(),r.version(),r.status()); }
     private static Saved saved(Revision r) { return new Saved(r.postId(),r.id(),r.version(),publishableStatic(r),r.updatedAt()); }

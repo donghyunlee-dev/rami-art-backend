@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ramiart.admin.auth.application.AdminReauthenticationService;
 import com.ramiart.admin.auth.application.AuditRecorder;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
@@ -26,7 +27,8 @@ class GalleryArtworkDetailModeTest {
         when(repository.find(artworkId, "DRAFT")).thenReturn(Optional.of(stored(artworkId, "DRAFT", draftMediaId)));
         when(repository.find(artworkId, "PUBLISHED")).thenReturn(Optional.of(stored(artworkId, "PUBLISHED", publishedMediaId)));
         GalleryArtworkService service = new GalleryArtworkService(repository, mock(AdminReauthenticationService.class),
-                mock(AuditRecorder.class), Clock.systemUTC(), new ObjectMapper());
+                mock(AuditRecorder.class), Clock.systemUTC(), new ObjectMapper(),
+                new MediaUrlResolver("https://rami-art-backend.onrender.com"));
         var auth = new UsernamePasswordAuthenticationToken(UUID.randomUUID().toString(), "",
                 java.util.List.of(new SimpleGrantedAuthority("GALLERY_READ")));
 
@@ -34,6 +36,31 @@ class GalleryArtworkDetailModeTest {
 
         assertThat(result.published().mediaAssetId()).isEqualTo(publishedMediaId);
         assertThat(result.media().id()).isEqualTo(publishedMediaId);
+    }
+
+    @Test
+    void detailResolvesStoredRelativeMediaPathLikeClassProgramDetail() {
+        GalleryArtworkRepository repository = mock(GalleryArtworkRepository.class);
+        UUID artworkId = UUID.randomUUID();
+        Stored draft = stored(artworkId, "DRAFT", UUID.randomUUID());
+        draft = new Stored(draft.id(), draft.artworkId(), draft.revision(), draft.status(), draft.visible(), draft.title(),
+                draft.courseId(), draft.courseCode(), draft.courseName(), draft.courseActive(), draft.audienceLabel(),
+                draft.medium(), draft.description(), draft.mediaAssetId(), "/media/2026/10/artwork.jpg", draft.fileName(),
+                draft.mimeType(), draft.fileSize(), draft.width(), draft.height(), draft.expiresAt(), draft.altText(),
+                draft.consentId(), draft.consentStatus(), draft.maskedStudentLabel(), draft.policyRevision(),
+                draft.exemptionReason(), draft.featured(), draft.featuredOrder(), draft.version(), draft.updatedAt(),
+                draft.publishedAt());
+        when(repository.find(artworkId, "DRAFT")).thenReturn(Optional.of(draft));
+        GalleryArtworkService service = new GalleryArtworkService(repository, mock(AdminReauthenticationService.class),
+                mock(AuditRecorder.class), Clock.systemUTC(), new ObjectMapper(),
+                new MediaUrlResolver("https://rami-art-backend.onrender.com"));
+        var auth = new UsernamePasswordAuthenticationToken(UUID.randomUUID().toString(), "",
+                java.util.List.of(new SimpleGrantedAuthority("GALLERY_READ")));
+
+        var result = service.detail(artworkId, "draft", auth);
+
+        assertThat(result.media().publicUrl())
+                .isEqualTo("https://rami-art-backend.onrender.com/media/2026/10/artwork.jpg");
     }
 
     private static Stored stored(UUID artworkId, String status, UUID mediaId) {

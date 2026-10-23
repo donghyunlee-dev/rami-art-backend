@@ -18,7 +18,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -33,18 +32,18 @@ public final class MediaService {
     private final AuditRecorder audit;
     private final Clock clock;
     private final TransactionTemplate transactions;
-    private final String publicBaseUrl;
+    private final MediaUrlResolver mediaUrls;
 
     public MediaService(MediaRepository repository, MediaStorage storage, ImageValidator validator,
             AuditRecorder audit, Clock clock, PlatformTransactionManager transactionManager,
-            @Value("${admin.media.public-base-url:http://localhost:8080}") String publicBaseUrl) {
+            MediaUrlResolver mediaUrls) {
         this.repository = repository;
         this.storage = storage;
         this.validator = validator;
         this.audit = audit;
         this.clock = clock;
         this.transactions = new TransactionTemplate(transactionManager);
-        this.publicBaseUrl = publicBaseUrl.replaceAll("/+$", "");
+        this.mediaUrls = mediaUrls;
     }
 
     public MediaAsset upload(byte[] bytes, String fileName, String contentType, UUID actorId,
@@ -128,8 +127,7 @@ public final class MediaService {
     }
 
     private MediaAsset response(StoredAsset asset) {
-        String url = asset.publicPath().startsWith("http://") || asset.publicPath().startsWith("https://")
-                ? asset.publicPath() : publicBaseUrl + asset.publicPath();
+        String url = mediaUrls.resolve(asset.publicPath());
         return new MediaAsset(asset.id(), url, asset.originalFileName(),
                 asset.mimeType(), asset.fileSize(), asset.width(), asset.height(), "READY", asset.expiresAt());
     }

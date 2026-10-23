@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
 import com.ramiart.admin.dev.PostgresScriptRunner;
 import com.ramiart.admin.homecontent.application.HomePageContentService;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -57,7 +58,8 @@ class HomePageContentPersistenceIntegrationTest {
         JdbcClient client = JdbcClient.create(dataSource);
         ObjectMapper mapper = new ObjectMapper();
         service = new HomePageContentService(new JdbcHomePageContentRepository(client, mapper),
-                new JdbcAuditRecorder(client, mapper), java.time.Clock.systemUTC());
+                new JdbcAuditRecorder(client, mapper), java.time.Clock.systemUTC(),
+                new MediaUrlResolver("https://rami-art-backend.onrender.com"));
         transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
     }
 

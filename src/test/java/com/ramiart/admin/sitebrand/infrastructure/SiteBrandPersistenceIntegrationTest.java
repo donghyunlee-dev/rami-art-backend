@@ -3,6 +3,7 @@ package com.ramiart.admin.sitebrand.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ramiart.admin.auth.infrastructure.JdbcAuditRecorder;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import com.ramiart.admin.dev.PostgresScriptRunner;
 import com.ramiart.admin.sitebrand.application.SiteBrandModels.BrandWrite;
 import com.ramiart.admin.sitebrand.application.SiteBrandService;
@@ -37,7 +38,7 @@ class SiteBrandPersistenceIntegrationTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @Import({SiteBrandService.class, JdbcSiteBrandRepository.class, JdbcAuditRecorder.class})
+    @Import({SiteBrandService.class, JdbcSiteBrandRepository.class, JdbcAuditRecorder.class, MediaUrlResolver.class})
     static class TestConfiguration {
         @Bean java.time.Clock clock() { return java.time.Clock.systemUTC(); }
     }

@@ -2,6 +2,7 @@ package com.ramiart.admin.sitebrand.application;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import com.ramiart.admin.sitebrand.application.SiteBrandModels.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -23,18 +24,19 @@ public class SiteBrandService {
     private final SiteBrandRepository repository;
     private final AuditRecorder audit;
     private final Clock clock;
-    public SiteBrandService(SiteBrandRepository repository, AuditRecorder audit, Clock clock) {
-        this.repository = repository; this.audit = audit; this.clock = clock;
+    private final MediaUrlResolver mediaUrls;
+    public SiteBrandService(SiteBrandRepository repository, AuditRecorder audit, Clock clock, MediaUrlResolver mediaUrls) {
+        this.repository = repository; this.audit = audit; this.clock = clock; this.mediaUrls = mediaUrls;
     }
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ) public AdminView get() {
         RevisionView published = repository.findByStatus("PUBLISHED").orElse(null);
         RevisionView draft = repository.findByStatus("DRAFT").orElse(null);
-        return new AdminView(draft != null, draft == null ? null : draft.id(), draft == null ? null : "DRAFT", published, draft);
+        return new AdminView(draft != null, draft == null ? null : draft.id(), draft == null ? null : "DRAFT", resolve(published), resolve(draft));
     }
     @Transactional public RevisionView createDraft(UUID actor, UUID key, RequestMetadata meta) {
         String scope = actor + ":SITE_BRAND_DRAFT_CREATE"; String hash = digest("POST:/api/admin/site-brand/draft");
         SiteBrandRepository.Claim claim = repository.claim(scope, key, hash);
-        if (!claim.claimed()) return repository.findById(claim.resourceId()).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
+        if (!claim.claimed()) return resolve(repository.findById(claim.resourceId()).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND")));
         if (repository.findByStatus("DRAFT").isPresent()) throw new SiteBrandException("SITE_BRAND_DRAFT_EXISTS");
         RevisionView base = repository.findByStatus("PUBLISHED").orElse(null);
         UUID basedOn = base == null ? null : base.id();
@@ -43,20 +45,20 @@ public class SiteBrandService {
         repository.replaceDraftReferences(id, copied);
         record(actor, meta, "SITE_BRAND_DRAFT_CREATED", id, Map.of("basedOnId", basedOn == null ? "" : basedOn.toString()));
         repository.complete(scope, key, id, 201);
-        return repository.findById(id).orElseThrow();
+        return resolve(repository.findById(id).orElseThrow());
     }
     @Transactional public RevisionView updateDraft(UUID id, BrandWrite raw, UUID actor, UUID key, RequestMetadata meta) {
         BrandWrite write = normalize(raw); validate(write);
         String scope = actor + ":SITE_BRAND_DRAFT_UPDATE:" + id;
         SiteBrandRepository.Claim claim = repository.claim(scope, key, digest("PUT:/api/admin/site-brand/draft/" + id + ":" + write));
-        if (!claim.claimed()) return repository.findById(id).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
+        if (!claim.claimed()) return resolve(repository.findById(id).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND")));
         RevisionView current = repository.findById(id).filter(v -> "DRAFT".equals(v.status())).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
         if (raw.version() == null || raw.version() != current.version()) throw new SiteBrandException("SITE_BRAND_VERSION_CONFLICT");
         if (repository.updateDraft(id, write) != 1) throw new SiteBrandException("SITE_BRAND_VERSION_CONFLICT");
         repository.replaceDraftReferences(id, write);
         record(actor, meta, "SITE_BRAND_DRAFT_UPDATED", id, Map.of("revision", current.revision()));
         repository.complete(scope, key, id, 200);
-        return repository.findById(id).orElseThrow();
+        return resolve(repository.findById(id).orElseThrow());
     }
     @Transactional(readOnly = true) public Preview preview(BrandWrite raw) {
         BrandWrite write = normalize(raw); validate(write);
@@ -66,14 +68,14 @@ public class SiteBrandService {
         String logo = repository.mediaUrl(write.logoAssetId());
         String favicon = repository.mediaUrl(write.faviconAssetId());
         String share = write.shareAssetId() == null ? null : repository.mediaUrl(write.shareAssetId());
-        return new Preview(new RenderModel(write.brandName(), write.shortName(), logo, favicon, share,
+        return new Preview(new RenderModel(write.brandName(), write.shortName(), mediaUrls.resolve(logo), mediaUrls.resolve(favicon), mediaUrls.resolve(share),
                 write.primaryColor(), write.accentColor(), write.fontPreset(), write.defaultTitle(),
                 write.defaultDescription(), write.canonicalHost()), checks, List.of(), checks.stream().allMatch(ContrastCheck::passed));
     }
     @Transactional public RevisionView publish(UUID id, long version, UUID actor, UUID key, RequestMetadata meta) {
         String scope = actor + ":SITE_BRAND_PUBLISH:" + id;
         SiteBrandRepository.Claim claim = repository.claim(scope, key, digest("POST:/api/admin/site-brand/draft/" + id + "/publish:" + version));
-        if (!claim.claimed()) return repository.findById(claim.resourceId()).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
+        if (!claim.claimed()) return resolve(repository.findById(claim.resourceId()).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND")));
         RevisionView draft = repository.findById(id).filter(v -> "DRAFT".equals(v.status())).orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
         if (draft.version() != version) throw new SiteBrandException("SITE_BRAND_VERSION_CONFLICT");
         BrandWrite write = from(draft); validate(write);
@@ -81,10 +83,25 @@ public class SiteBrandService {
         repository.publish(id, version, actor);
         record(actor, meta, "SITE_BRAND_PUBLISHED", id, Map.of("revision", draft.revision()));
         repository.complete(scope, key, id, 200);
-        return repository.findById(id).orElseThrow();
+        return resolve(repository.findById(id).orElseThrow());
     }
     @Transactional(readOnly = true) public PublicBrand publicBrand() {
-        return repository.findPublic().orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
+        PublicBrand brand = repository.findPublic().orElseThrow(() -> new SiteBrandException("SITE_BRAND_NOT_FOUND"));
+        return new PublicBrand(brand.revision(), brand.brandName(), brand.shortName(), mediaUrls.resolve(brand.logoUrl()),
+                brand.logoAltText(), mediaUrls.resolve(brand.faviconUrl()), mediaUrls.resolve(brand.shareImageUrl()),
+                brand.primaryColor(), brand.accentColor(), brand.fontPreset(), brand.canonicalHost(), brand.defaultTitle(),
+                brand.defaultDescription(), brand.instagramUrl(), brand.blogUrl(), brand.publishedAt());
+    }
+    private RevisionView resolve(RevisionView revision) {
+        if (revision == null) return null;
+        return new RevisionView(revision.id(), revision.revision(), revision.status(), revision.version(), revision.brandName(),
+                revision.shortName(), revision.logoAssetId(), revision.logoAltText(), revision.faviconAssetId(), revision.shareAssetId(),
+                revision.primaryColor(), revision.accentColor(), revision.fontPreset(), revision.canonicalHost(), revision.defaultTitle(),
+                revision.defaultDescription(), revision.instagramUrl(), revision.blogUrl(), resolve(revision.logo()),
+                resolve(revision.favicon()), resolve(revision.share()), revision.updatedAt(), revision.publishedAt());
+    }
+    private MediaView resolve(MediaView media) {
+        return media == null ? null : new MediaView(mediaUrls.resolve(media.url()), media.width(), media.height());
     }
     private void record(UUID actor, RequestMetadata meta, String action, UUID id, Map<String,Object> details) {
         audit.record(new Event(clock.instant(), meta.requestId(), "MGT-SITE-BRAND", "OPERATION", "ADMIN", actor,

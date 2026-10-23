@@ -2,6 +2,7 @@ package com.ramiart.admin.directorprofile.application;
 
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
+import com.ramiart.admin.media.application.MediaUrlResolver;
 import static com.ramiart.admin.directorprofile.application.DirectorProfileModels.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,8 +28,10 @@ public class DirectorProfileService {
     private final DirectorProfileRepository repository;
     private final AuditRecorder audit;
     private final Clock clock;
-    public DirectorProfileService(DirectorProfileRepository repository, AuditRecorder audit, Clock clock) {
-        this.repository = repository; this.audit = audit; this.clock = clock;
+    private final MediaUrlResolver mediaUrls;
+    public DirectorProfileService(DirectorProfileRepository repository, AuditRecorder audit, Clock clock,
+            MediaUrlResolver mediaUrls) {
+        this.repository = repository; this.audit = audit; this.clock = clock; this.mediaUrls = mediaUrls;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -150,7 +153,8 @@ public class DirectorProfileService {
         return new AdminView(profile.id(), editable ? profile.id() : null, profile.revision(), profile.status(),
                 editable ? "DRAFT" : profile.status(), editable, profile.version(), profile.name(), profile.title(),
                 profile.introduction(), content.careers(), profile.about(), profile.philosophy(), profile.facilitySection(),
-                profile.educationSection(), profile.direction(), profile.portrait(), content.facilities(), content.items(), publishable,
+                profile.educationSection(), profile.direction(), resolveImage(profile.portrait()), content.facilities().stream()
+                        .map(f -> new Facility(f.id(), f.name(), f.description(), resolveImage(f.image()), f.displayOrder(), f.visible())).toList(), content.items(), publishable,
                 new Actions(canCreate, editable, editable, editable && publishable), profile.updatedAt());
     }
     private boolean isPublishable(StoredProfile profile, Content content) {
@@ -296,7 +300,11 @@ public class DirectorProfileService {
     }
     private PublicImage publicImage(Image image) {
         return image == null || !repository.imageCurrentlyPublic(image.mediaAssetId(), image.includesStudent(), image.studentConsentId(), true)
-                ? null : new PublicImage(image.imageUrl(), image.altText());
+                ? null : new PublicImage(mediaUrls.resolve(image.imageUrl()), image.altText());
+    }
+    private Image resolveImage(Image image) {
+        return image == null ? null : new Image(image.mediaAssetId(), mediaUrls.resolve(image.imageUrl()), image.altText(),
+                image.rightsBasis(), image.includesStudent(), image.studentConsentId());
     }
     private Content content(UUID id) { return new Content(repository.careers(id), repository.facilities(id), repository.aboutItems(id)); }
     private static Write emptyWrite(long version) {
