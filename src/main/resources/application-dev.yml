@@ -70,7 +70,7 @@ logging:
     org:
 
       springframework:
-        web: debug
+        web: info
     com:
       windsoft:
         apartment_parking_manager: debug
