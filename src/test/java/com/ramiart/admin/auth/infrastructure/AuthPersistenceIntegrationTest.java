@@ -756,6 +756,23 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
+    void mediaClientDiagnosticsRequireSessionAndAcceptOnlyKnownStages() throws Exception {
+        createRoleUser("OWNER", "media-diagnostics-owner@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "media-diagnostics-owner@rami.local", TEMPORARY_PASSWORD, null,
+                metadata("req_media_diagnostics")).rawToken();
+        String path = "/api/admin/media-assets/" + UUID.randomUUID() + "/client-events";
+        String validBody = "{\"stage\":\"RESPONSE_READY\",\"detail\":\"req_upload\"}";
+
+        assertThat(http("POST", path, null, "http://localhost:3000", validBody).statusCode()).isEqualTo(401);
+        var accepted = http("POST", path, cookie, "http://localhost:3000", validBody);
+        assertThat(accepted.statusCode()).as(accepted.body()).isEqualTo(204);
+        assertThat(accepted.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        assertThat(http("POST", path, cookie, "http://localhost:3000",
+                "{\"stage\":\"UNKNOWN\"}").statusCode()).isEqualTo(400);
+    }
+
+    @Test
     void dataTransferTemplateIsVersionedCsvAndRequiresImportPermission() throws Exception {
         createRoleUser("OPERATOR", "data-transfer-template-operator@rami.local");
         String cookie = "__Host-rami_admin_session=" + authSessionService.login(

@@ -9,6 +9,9 @@ import com.ramiart.admin.media.application.MediaService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -21,12 +24,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/admin/media-assets")
 public final class MediaController {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MediaController.class);
+    private static final Set<String> CLIENT_STAGES = Set.of("RESPONSE_READY", "FORM_CHANGE_CALLED",
+            "FORM_STATE_COMMITTED", "PREVIEW_LOADED", "PREVIEW_FAILED", "REFERENCES_STARTED", "REFERENCES_READY",
+            "REFERENCES_FAILED", "CLIENT_ERROR", "PAGE_HIDDEN");
     private final MediaService service;
 
     public MediaController(MediaService service) {
@@ -57,6 +65,21 @@ public final class MediaController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(ApiEnvelope.success(service.references(assetId, authentication), RequestIdFilter.get(request)));
     }
+
+    @PostMapping("/{assetId}/client-events")
+    ResponseEntity<Void> clientEvent(@PathVariable UUID assetId, @RequestBody ClientEvent event,
+            HttpServletRequest request) {
+        if (event == null || !CLIENT_STAGES.contains(event.stage())) throw new IllegalArgumentException("Invalid media client stage");
+        String detail = event.detail() == null ? "" : event.detail()
+                .replaceAll("https?://\\S+", "[url]")
+                .replaceAll("[\\p{Cntrl}]", " ");
+        if (detail.length() > 300) detail = detail.substring(0, 300);
+        LOGGER.info("media_client_event assetId={} stage={} detail={} requestId={}",
+                assetId, event.stage(), detail, RequestIdFilter.get(request));
+        return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+    }
+
+    record ClientEvent(String stage, String detail) {}
 
     private static RequestMetadata metadata(HttpServletRequest request) {
         String userAgent = request.getHeader(HttpHeaders.USER_AGENT);

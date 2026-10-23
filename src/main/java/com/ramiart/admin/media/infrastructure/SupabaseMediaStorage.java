@@ -4,6 +4,8 @@ import com.ramiart.admin.media.application.MediaException;
 import com.ramiart.admin.media.application.MediaStorage;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.http.HttpHeaders;
@@ -18,6 +20,7 @@ import org.springframework.web.util.UriUtils;
 @ConditionalOnExpression("'${app.storage.supabase-url:}' != '' and '${app.storage.service-key:}' != ''")
 public final class SupabaseMediaStorage implements MediaStorage {
     private static final String KEY_PREFIX = "public-media/";
+    private static final Logger LOGGER = LoggerFactory.getLogger(SupabaseMediaStorage.class);
 
     private final RestClient client;
     private final String baseUrl;
@@ -32,6 +35,7 @@ public final class SupabaseMediaStorage implements MediaStorage {
         this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
         this.serviceKey = serviceKey;
         this.bucket = bucket;
+        LOGGER.info("media_storage_backend=supabase");
     }
 
     @Override
