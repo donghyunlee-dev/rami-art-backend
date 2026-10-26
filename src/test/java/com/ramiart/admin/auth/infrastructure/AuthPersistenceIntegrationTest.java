@@ -134,7 +134,7 @@ class AuthPersistenceIntegrationTest {
                 .doesNotContain("name", "visible", "rights_basis", "includes_student", "student_consent_id");
         assertThat(jdbcTemplate.queryForList(
                 "select column_name from information_schema.columns where table_schema=current_schema() and table_name='director_career'",
-                String.class)).doesNotContain("hidden");
+                String.class)).doesNotContain("hidden", "period");
     }
 
     @Test
@@ -162,11 +162,14 @@ class AuthPersistenceIntegrationTest {
                 """, hiddenImage, profile, asset);
 
         PostgresScriptRunner.execute(dataSource, projectRoot().resolve("supabase/migrations/202610250001_director_profile_content_reduction.sql"));
+        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("supabase/migrations/202610260001_director_career_plain_text.sql"));
 
         assertThat(jdbcTemplate.queryForObject("select studio_introduction from director_profile where id=?", String.class, profile))
                 .isEqualTo("라미아트 미술교습소는 다양한 재료와 주제를 경험하며 스스로 느끼고 생각하고 표현하는 힘을 키우는 미술교습소입니다.\n\n모든 아이들이 가진 고유한 창의성을 존중하고, 그것을 표현할 수 있는 기술과 자신감을 키워주는 것을 목표로 합니다.");
         assertThat(jdbcTemplate.queryForObject("select count(*) from director_career where director_profile_id=?", Integer.class, profile)).isOne();
         assertThat(jdbcTemplate.queryForObject("select display_order from director_career where id=?", Integer.class, visibleCareer)).isZero();
+        assertThat(jdbcTemplate.queryForObject("select title from director_career where id=?", String.class, visibleCareer))
+                .isEqualTo("2018~현재 공개 이력");
         assertThat(jdbcTemplate.queryForObject("select count(*) from director_studio_image where director_profile_id=?", Integer.class, profile)).isOne();
         assertThat(jdbcTemplate.queryForObject("select display_order from director_studio_image where id=?", Integer.class, visibleImage)).isZero();
         assertThat(jdbcTemplate.queryForObject("select field_name from media_asset_reference where owner_id=? and field_name like 'studioImage:%'", String.class, profile))
@@ -291,7 +294,8 @@ class AuthPersistenceIntegrationTest {
         }
         try (var migrations = Files.list(projectRoot().resolve("supabase/migrations"))) {
             for (Path migration : migrations.filter(path -> path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql"))
-                    .filter(path -> includeContentReduction || !path.getFileName().toString().startsWith("202610250001_"))
+                    .filter(path -> includeContentReduction || !(path.getFileName().toString().startsWith("202610250001_")
+                            || path.getFileName().toString().startsWith("202610260001_")))
                     .sorted().toList()) {
                 PostgresScriptRunner.execute(dataSource, migration);
             }
@@ -697,7 +701,7 @@ class AuthPersistenceIntegrationTest {
                 {"version":0,"name":"이원장","introduction":"아이의 시선을 존중합니다.",
                  "studioIntroduction":"다양한 재료로 표현하는 교습소입니다.",
                  "portrait":{"mediaAssetId":"%s","imageUrl":"/media/director.webp","altText":"이원장 사진"},
-                 "careers":[{"id":"%s","period":"2018~현재","title":"아동미술 교육","displayOrder":0}],
+                 "careers":[{"id":"%s","title":"2018~현재 아동미술 교육","displayOrder":0}],
                  "studioImages":[{"id":"%s","mediaAssetId":"%s","imageUrl":"/media/studio.webp",
                    "altText":"미술 재료가 놓인 교실","description":"밝고 쾌적한 교실입니다.","displayOrder":0}]}
                 """.formatted(asset, visibleCareer, imageId, asset);
@@ -717,7 +721,10 @@ class AuthPersistenceIntegrationTest {
                 ownerCookie, write, UUID.randomUUID());
         assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
         assertThat(saved.body()).contains("\"version\":1", "studioIntroduction", "studioImages", "아동미술 교육")
-                .doesNotContain("rightsBasis", "studentConsentId", "educationItems", "hidden");
+                .doesNotContain("rightsBasis", "studentConsentId", "educationItems", "hidden", "period");
+        HttpResponse<String> oldPeriodFieldRejected = httpWithKey("PUT", "/api/admin/director-profile/drafts/" + draftId,
+                ownerCookie, write.replace("\"title\":\"2018~현재 아동미술 교육\"", "\"period\":\"2018~현재\",\"title\":\"아동미술 교육\""), UUID.randomUUID());
+        assertThat(oldPeriodFieldRejected.statusCode()).as(oldPeriodFieldRejected.body()).isEqualTo(400);
         HttpResponse<String> references = http("GET", "/api/admin/media-assets/" + asset + "/references", ownerCookie, null, null);
         assertThat(references.statusCode()).as(references.body()).isEqualTo(200);
         assertThat(references.body()).doesNotContain("CONSENT_BLOCKED", "rightsBasis", "studentConsentId");
@@ -733,7 +740,7 @@ class AuthPersistenceIntegrationTest {
         HttpResponse<String> publicProfile = http("GET", "/api/public/director-profile", null, null, null);
         assertThat(publicProfile.statusCode()).isEqualTo(200);
         assertThat(publicProfile.body()).contains("이원장", "아동미술 교육", "다양한 재료로 표현하는 교습소입니다.", "미술 재료가 놓인 교실")
-                .doesNotContain("rightsBasis", "studentConsentId", "profileId", "draftId", "version");
+                .doesNotContain("rightsBasis", "studentConsentId", "profileId", "draftId", "version", "period");
     }
 
     @Test

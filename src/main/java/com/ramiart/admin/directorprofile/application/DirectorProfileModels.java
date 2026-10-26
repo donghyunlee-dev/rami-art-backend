@@ -6,8 +6,8 @@ import java.util.UUID;
 
 public final class DirectorProfileModels {
     private DirectorProfileModels() {}
-    public record CareerWrite(UUID id, String period, String title, Integer displayOrder) {}
-    public record Career(UUID id, String period, String title, int displayOrder) {}
+    public record CareerWrite(UUID id, String title, Integer displayOrder) {}
+    public record Career(UUID id, String title, int displayOrder) {}
     public record Image(UUID mediaAssetId, String imageUrl, String altText) {}
     public record StudioImageWrite(UUID id, UUID mediaAssetId, String imageUrl, String altText,
             String description, Integer displayOrder) {}
@@ -24,7 +24,7 @@ public final class DirectorProfileModels {
             boolean editable, long version, String name, String introduction, String studioIntroduction,
             List<Career> careers, Image portrait, List<StudioImage> studioImages, boolean publishable,
             Actions actions, Instant updatedAt) {}
-    public record PublicCareer(String period, String title, int displayOrder) {}
+    public record PublicCareer(String title, int displayOrder) {}
     public record PublicView(int revision, String name, String introduction, String studioIntroduction,
             List<PublicCareer> careers, PublicImage portrait, List<PublicStudioImage> studioImages,
             Instant publishedAt) {}

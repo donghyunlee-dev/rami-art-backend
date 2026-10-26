@@ -77,7 +77,7 @@ public class DirectorProfileController {
         validateKeys(raw, WRITE_FIELDS);
         JsonNode careers = raw.get("careers");
         if (careers != null && careers.isArray()) for (int i = 0; i < careers.size(); i++)
-            validateKeys(careers.get(i), Set.of("id", "period", "title", "displayOrder"));
+            validateKeys(careers.get(i), Set.of("id", "title", "displayOrder"));
         if (raw.has("portrait") && !raw.get("portrait").isNull())
             validateKeys(raw.get("portrait"), Set.of("mediaAssetId", "imageUrl", "altText"));
         JsonNode images = raw.get("studioImages");

@@ -29,8 +29,8 @@ public class JdbcDirectorProfileRepository implements DirectorProfileRepository 
         return jdbc.sql(selectProfile() + " where p.id=:id for update of p").param("id", id).query(PROFILE).optional();
     }
     @Override public List<Career> careers(UUID profileId) {
-        return jdbc.sql("select id,period,title,display_order from director_career where director_profile_id=:id order by display_order,id")
-                .param("id", profileId).query((rs, n) -> new Career(rs.getObject("id", UUID.class), rs.getString("period"),
+        return jdbc.sql("select id,title,display_order from director_career where director_profile_id=:id order by display_order,id")
+                .param("id", profileId).query((rs, n) -> new Career(rs.getObject("id", UUID.class),
                         rs.getString("title"), rs.getInt("display_order"))).list();
     }
     @Override public List<StudioImage> studioImages(UUID profileId) {
@@ -75,9 +75,9 @@ public class JdbcDirectorProfileRepository implements DirectorProfileRepository 
     @Override public void replaceCareers(UUID profileId, List<Career> careers) {
         jdbc.sql("delete from director_career where director_profile_id=:id").param("id", profileId).update();
         for (Career career : careers) jdbc.sql("""
-                insert into director_career(id,director_profile_id,period,title,display_order)
-                values(:id,:profile,:period,:title,:order)
-                """).param("id", career.id()).param("profile", profileId).param("period", career.period())
+                insert into director_career(id,director_profile_id,title,display_order)
+                values(:id,:profile,:title,:order)
+                """).param("id", career.id()).param("profile", profileId)
                 .param("title", career.title()).param("order", career.displayOrder()).update();
     }
     @Override public void replaceStudioImages(UUID profileId, List<StudioImage> images) {

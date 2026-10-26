@@ -59,7 +59,7 @@ public class DirectorProfileService {
         StoredProfile published = repository.findByStatus("PUBLISHED").orElse(null);
         Content source = published == null ? new Content(List.of(), List.of()) : content(published.id());
         List<Career> careers = source.careers().stream()
-                .map(c -> new Career(UUID.randomUUID(), c.period(), c.title(), c.displayOrder())).toList();
+                .map(c -> new Career(UUID.randomUUID(), c.title(), c.displayOrder())).toList();
         List<StudioImage> images = source.images().stream().map(i -> new StudioImage(UUID.randomUUID(),
                 i.mediaAssetId(), i.imageUrl(), i.altText(), i.description(), i.displayOrder())).toList();
         UUID id = repository.insertDraft(published == null ? emptyWrite(0L) : from(published, 0L, source), actor,
@@ -89,7 +89,7 @@ public class DirectorProfileService {
         for (int i = 0; i < write.studioImages().size(); i++)
             if (!repository.imageCurrentlyPublic(write.studioImages().get(i).mediaAssetId()))
                 throw new DirectorProfileException("DIRECTOR_PROFILE_INVALID", "studioImages[" + i + "].mediaAssetId");
-        List<Career> careers = write.careers().stream().map(c -> new Career(c.id(), c.period(), c.title(), c.displayOrder())).toList();
+        List<Career> careers = write.careers().stream().map(c -> new Career(c.id(), c.title(), c.displayOrder())).toList();
         List<StudioImage> images = write.studioImages().stream().map(i -> new StudioImage(i.id(), i.mediaAssetId(),
                 i.imageUrl(), i.altText(), i.description(), i.displayOrder())).toList();
         if (repository.updateDraft(id, write) != 1) throw new DirectorProfileException("DIRECTOR_PROFILE_VERSION_CONFLICT");
@@ -169,15 +169,14 @@ public class DirectorProfileService {
                 .filter(i -> repository.imageCurrentlyPublic(i.mediaAssetId()))
                 .map(i -> new PublicStudioImage(mediaUrls.resolve(i.imageUrl()), i.altText(), i.description(), i.displayOrder())).toList();
         return new PublicView(profile.revision(), profile.name(), profile.introduction(), profile.studioIntroduction(),
-                content.careers().stream().map(c -> new PublicCareer(c.period(), c.title(), c.displayOrder())).toList(),
+                content.careers().stream().map(c -> new PublicCareer(c.title(), c.displayOrder())).toList(),
                 portrait, images, profile.publishedAt());
     }
     private static Write normalize(Write raw) {
         if (raw == null) throw new DirectorProfileException("VALIDATION_ERROR");
         List<CareerWrite> careers = raw.careers() == null ? null : raw.careers().stream().map(c -> {
             if (c == null) throw new DirectorProfileException("DIRECTOR_PROFILE_INVALID", "careers");
-            String period = trim(c.period());
-            return new CareerWrite(c.id(), period == null || period.isEmpty() ? null : period, trim(c.title()), c.displayOrder());
+            return new CareerWrite(c.id(), trim(c.title()), c.displayOrder());
         }).toList();
         List<StudioImageWrite> images = raw.studioImages() == null ? null : raw.studioImages().stream().map(i -> {
             if (i == null) throw new DirectorProfileException("DIRECTOR_PROFILE_INVALID", "studioImages");
@@ -202,7 +201,7 @@ public class DirectorProfileService {
             CareerWrite career = write.careers().get(i);
             String field = "careers[" + i + "]";
             if (career.id() == null || !ids.add(career.id()) || career.title() == null || career.title().isEmpty()
-                    || career.title().length() > 200 || career.period() != null && (career.period().isEmpty() || career.period().length() > 50)
+                    || career.title().length() > 251
                     || career.displayOrder() == null || career.displayOrder() != i)
                 throw new DirectorProfileException("DIRECTOR_PROFILE_INVALID", field);
         }
@@ -238,7 +237,7 @@ public class DirectorProfileService {
     }
     private static Write from(StoredProfile p, long version, Content content) {
         return new Write(version, p.name(), p.introduction(), p.studioIntroduction(),
-                content.careers().stream().map(c -> new CareerWrite(c.id(), c.period(), c.title(), c.displayOrder())).toList(),
+                content.careers().stream().map(c -> new CareerWrite(c.id(), c.title(), c.displayOrder())).toList(),
                 p.portrait(), content.images().stream().map(i -> new StudioImageWrite(i.id(), i.mediaAssetId(), i.imageUrl(),
                         i.altText(), i.description(), i.displayOrder())).toList());
     }
