@@ -27,8 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class DirectorProfileController {
-    private static final Set<String> WRITE_FIELDS = Set.of("version", "name", "title", "introduction", "careers", "about",
-            "philosophy", "facilitySection", "educationSection", "direction", "portrait", "facilities", "educationItems");
+    private static final Set<String> WRITE_FIELDS = Set.of("version", "name", "introduction", "studioIntroduction", "careers", "portrait", "studioImages");
     private final DirectorProfileService service;
     private final ObjectMapper mapper;
     public DirectorProfileController(DirectorProfileService service, ObjectMapper mapper) {
@@ -58,10 +57,6 @@ public class DirectorProfileController {
             Authentication auth, HttpServletRequest request) {
         return admin(service.preview(draftId, version, auth), request);
     }
-    @GetMapping("/api/admin/director-profile/consent-options")
-    ResponseEntity<ApiEnvelope<java.util.List<ConsentOption>>> consentOptions(Authentication auth, HttpServletRequest request) {
-        return admin(service.consentOptions(auth), request);
-    }
     @PostMapping("/api/admin/director-profile/publications")
     ResponseEntity<ApiEnvelope<Publication>> publish(@RequestHeader("Idempotency-Key") UUID key,
             @RequestBody JsonNode raw, Authentication auth, HttpServletRequest request) {
@@ -81,21 +76,13 @@ public class DirectorProfileController {
     private Write parseWrite(JsonNode raw) {
         validateKeys(raw, WRITE_FIELDS);
         JsonNode careers = raw.get("careers");
-        if (careers != null && careers.isArray()) {
-            for (int i = 0; i < careers.size(); i++) validateKeys(careers.get(i), Set.of("id", "period", "title", "displayOrder", "hidden"));
-        }
-        for (String field : Set.of("about", "philosophy", "facilitySection", "educationSection", "direction"))
-            validateKeys(raw.get(field), Set.of("eyebrow", "title", "description"));
-        validateKeys(raw.get("portrait"), Set.of("mediaAssetId", "imageUrl", "altText", "rightsBasis", "includesStudent", "studentConsentId"));
-        JsonNode facilities = raw.get("facilities");
-        if (facilities != null && facilities.isArray()) for (int i = 0; i < facilities.size(); i++) {
-            JsonNode facility = facilities.get(i);
-            validateKeys(facility, Set.of("id", "name", "description", "image", "displayOrder", "visible"));
-            validateKeys(facility.get("image"), Set.of("mediaAssetId", "imageUrl", "altText", "rightsBasis", "includesStudent", "studentConsentId"));
-        }
-        JsonNode items = raw.get("educationItems");
-        if (items != null && items.isArray()) for (int i = 0; i < items.size(); i++)
-            validateKeys(items.get(i), Set.of("id", "itemType", "iconCode", "title", "description", "displayOrder", "visible"));
+        if (careers != null && careers.isArray()) for (int i = 0; i < careers.size(); i++)
+            validateKeys(careers.get(i), Set.of("id", "period", "title", "displayOrder"));
+        if (raw.has("portrait") && !raw.get("portrait").isNull())
+            validateKeys(raw.get("portrait"), Set.of("mediaAssetId", "imageUrl", "altText"));
+        JsonNode images = raw.get("studioImages");
+        if (images != null && images.isArray()) for (int i = 0; i < images.size(); i++)
+            validateKeys(images.get(i), Set.of("id", "mediaAssetId", "imageUrl", "altText", "description", "displayOrder"));
         return convert(raw, Write.class);
     }
     private <T> T parse(JsonNode raw, Set<String> fields, Class<T> type) {

@@ -114,6 +114,67 @@ class AuthPersistenceIntegrationTest {
     private int port;
 
     @Test
+    void directorProfileSchemaContainsOnlyEditableContentAndOrderedStudioImages() {
+        List<String> profileColumns = jdbcTemplate.queryForList(
+                "select column_name from information_schema.columns where table_schema=current_schema() and table_name='director_profile'",
+                String.class);
+        assertThat(profileColumns).contains("name", "introduction", "studio_introduction",
+                "portrait_media_asset_id", "portrait_alt_text")
+                .doesNotContain("title", "about_title", "philosophy_title", "education_title",
+                        "direction_title", "portrait_rights_basis", "portrait_student_consent_id");
+
+        assertThat(jdbcTemplate.queryForObject("select to_regclass(current_schema() || '.director_about_item') is null", Boolean.class))
+                .isTrue();
+        assertThat(jdbcTemplate.queryForObject("select to_regclass(current_schema() || '.director_studio_image') is not null", Boolean.class))
+                .isTrue();
+        List<String> imageColumns = jdbcTemplate.queryForList(
+                "select column_name from information_schema.columns where table_schema=current_schema() and table_name='director_studio_image'",
+                String.class);
+        assertThat(imageColumns).contains("media_asset_id", "alt_text", "description", "display_order")
+                .doesNotContain("name", "visible", "rights_basis", "includes_student", "student_consent_id");
+        assertThat(jdbcTemplate.queryForList(
+                "select column_name from information_schema.columns where table_schema=current_schema() and table_name='director_career'",
+                String.class)).doesNotContain("hidden");
+    }
+
+    @Test
+    void directorProfileMigrationMovesOnlyPreviouslyPublicContentIntoTheReducedModel() throws Exception {
+        resetDatabase(false);
+        UUID actor = UUID.fromString("20000000-0000-0000-0000-000000000001");
+        UUID profile = UUID.randomUUID();
+        UUID visibleCareer = UUID.randomUUID();
+        UUID hiddenCareer = UUID.randomUUID();
+        UUID visibleImage = UUID.randomUUID();
+        UUID hiddenImage = UUID.randomUUID();
+        UUID asset = jdbcTemplate.queryForObject("select id from media_asset where status='READY' and public_path is not null limit 1", UUID.class);
+        jdbcTemplate.update("insert into director_profile(id,revision,status,name,title,introduction,created_by) values(?,1,'DRAFT','김보람','원장','소개',?)", profile, actor);
+        jdbcTemplate.update("insert into director_career(id,director_profile_id,period,title,display_order,hidden) values(?,?,?,'공개 이력',7,false)", visibleCareer, profile, "2018~현재");
+        jdbcTemplate.update("insert into director_career(id,director_profile_id,period,title,display_order,hidden) values(?,?,?,'숨김 이력',9,true)", hiddenCareer, profile, null);
+        jdbcTemplate.update("""
+                insert into director_facility(id,director_profile_id,name,description,media_asset_id,alt_text,rights_basis,
+                  includes_student,student_consent_id,display_order,visible)
+                values(?,?,'교실','교실 설명',?,'교실 사진','STUDIO_OWNED',false,null,4,true)
+                """, visibleImage, profile, asset);
+        jdbcTemplate.update("""
+                insert into director_facility(id,director_profile_id,name,description,media_asset_id,alt_text,rights_basis,
+                  includes_student,student_consent_id,display_order,visible)
+                values(?,?,'숨김 공간','숨김 설명',?,'숨김 사진','STUDIO_OWNED',false,null,8,false)
+                """, hiddenImage, profile, asset);
+
+        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("supabase/migrations/202610250001_director_profile_content_reduction.sql"));
+
+        assertThat(jdbcTemplate.queryForObject("select studio_introduction from director_profile where id=?", String.class, profile))
+                .isEqualTo("라미아트 미술교습소는 다양한 재료와 주제를 경험하며 스스로 느끼고 생각하고 표현하는 힘을 키우는 미술교습소입니다.\n\n모든 아이들이 가진 고유한 창의성을 존중하고, 그것을 표현할 수 있는 기술과 자신감을 키워주는 것을 목표로 합니다.");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from director_career where director_profile_id=?", Integer.class, profile)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select display_order from director_career where id=?", Integer.class, visibleCareer)).isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from director_studio_image where director_profile_id=?", Integer.class, profile)).isOne();
+        assertThat(jdbcTemplate.queryForObject("select display_order from director_studio_image where id=?", Integer.class, visibleImage)).isZero();
+        assertThat(jdbcTemplate.queryForObject("select field_name from media_asset_reference where owner_id=? and field_name like 'studioImage:%'", String.class, profile))
+                .isEqualTo("studioImage:" + visibleImage);
+        assertThat(jdbcTemplate.queryForObject("select to_regclass(current_schema() || '.director_facility') is null", Boolean.class)).isTrue();
+    }
+
+    @Test
     void httpSecurityEnforcesSessionOriginPasswordChangeAndLogout() throws Exception {
         assertThat(http("GET", "/api/admin/operations/probe", null, null, null).statusCode()).isEqualTo(401);
         var deniedOrigin = http("POST", "/api/admin/auth/sessions", null, "https://untrusted.example", "{}");
@@ -213,6 +274,10 @@ class AuthPersistenceIntegrationTest {
 
     @BeforeEach
     void resetDatabase() throws SQLException, IOException {
+        resetDatabase(true);
+    }
+
+    private void resetDatabase(boolean includeContentReduction) throws SQLException, IOException {
         jdbcTemplate = new JdbcTemplate(dataSource);
         try (Connection connection = dataSource.getConnection();
                 Statement statement = connection.createStatement()) {
@@ -225,7 +290,9 @@ class AuthPersistenceIntegrationTest {
             statement.execute("create schema extensions");
         }
         try (var migrations = Files.list(projectRoot().resolve("supabase/migrations"))) {
-            for (Path migration : migrations.filter(path -> path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql")).sorted().toList()) {
+            for (Path migration : migrations.filter(path -> path.getFileName().toString().matches("[0-9]{12,}_.+\\.sql"))
+                    .filter(path -> includeContentReduction || !path.getFileName().toString().startsWith("202610250001_"))
+                    .sorted().toList()) {
                 PostgresScriptRunner.execute(dataSource, migration);
             }
         }
@@ -611,7 +678,7 @@ class AuthPersistenceIntegrationTest {
     }
 
     @Test
-    void directorProfileRevisionRoutesKeepHiddenCareersOutOfPublicRead() throws Exception {
+    void directorProfileRevisionRoutesPublishOnlyTheReducedEditableContent() throws Exception {
         createRoleUser("OWNER", "director-profile-owner@rami.local");
         createRoleUser("OPERATOR", "director-profile-content@rami.local");
         String ownerCookie = "__Host-rami_admin_session=" + authSessionService.login(
@@ -624,19 +691,38 @@ class AuthPersistenceIntegrationTest {
         UUID draftId = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body())
                 .path("data").path("draftId").asText());
         UUID visibleCareer = UUID.randomUUID();
-        UUID hiddenCareer = UUID.randomUUID();
+        UUID imageId = UUID.randomUUID();
+        UUID asset = jdbcTemplate.queryForObject("select id from media_asset where status='READY' and public_path is not null limit 1", UUID.class);
         String write = """
-                {"version":0,"name":"이원장","title":"라미아트 원장",
-                 "introduction":"아이의 시선을 존중합니다.","careers":[
-                   {"id":"%s","period":"2018~현재","title":"아동미술 교육","displayOrder":0,"hidden":false},
-                   {"id":"%s","period":null,"title":"비공개 경력","displayOrder":1,"hidden":true}]}
-                """.formatted(visibleCareer, hiddenCareer);
+                {"version":0,"name":"이원장","introduction":"아이의 시선을 존중합니다.",
+                 "studioIntroduction":"다양한 재료로 표현하는 교습소입니다.",
+                 "portrait":{"mediaAssetId":"%s","imageUrl":"/media/director.webp","altText":"이원장 사진"},
+                 "careers":[{"id":"%s","period":"2018~현재","title":"아동미술 교육","displayOrder":0}],
+                 "studioImages":[{"id":"%s","mediaAssetId":"%s","imageUrl":"/media/studio.webp",
+                   "altText":"미술 재료가 놓인 교실","description":"밝고 쾌적한 교실입니다.","displayOrder":0}]}
+                """.formatted(asset, visibleCareer, imageId, asset);
+        UUID privateAsset = UUID.randomUUID();
+        UUID actor = jdbcTemplate.queryForObject("select id from admin_user where email='director-profile-owner@rami.local'", UUID.class);
+        jdbcTemplate.update("""
+                insert into media_asset(id,storage_key,public_path,original_file_name,sha256,mime_type,file_size,width,height,status,created_by)
+                values(?, 'private-evidence/director-test.png','/media/director-test.png','director-test.png',repeat('c',64),'image/png',1,1,1,'READY',?)
+                """, privateAsset, actor);
+        HttpResponse<String> privateAssetRejected = httpWithKey("PUT", "/api/admin/director-profile/drafts/" + draftId,
+                ownerCookie, write.replace(asset.toString(), privateAsset.toString()), UUID.randomUUID());
+        assertThat(privateAssetRejected.statusCode()).as(privateAssetRejected.body()).isEqualTo(422);
+        HttpResponse<String> longDescriptionRejected = httpWithKey("PUT", "/api/admin/director-profile/drafts/" + draftId,
+                ownerCookie, write.replace("밝고 쾌적한 교실입니다.", "x".repeat(501)), UUID.randomUUID());
+        assertThat(longDescriptionRejected.statusCode()).as(longDescriptionRejected.body()).isEqualTo(422);
         HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/director-profile/drafts/" + draftId,
                 ownerCookie, write, UUID.randomUUID());
         assertThat(saved.statusCode()).as(saved.body()).isEqualTo(200);
-        assertThat(saved.body()).contains("\"version\":1", "비공개 경력");
+        assertThat(saved.body()).contains("\"version\":1", "studioIntroduction", "studioImages", "아동미술 교육")
+                .doesNotContain("rightsBasis", "studentConsentId", "educationItems", "hidden");
+        HttpResponse<String> references = http("GET", "/api/admin/media-assets/" + asset + "/references", ownerCookie, null, null);
+        assertThat(references.statusCode()).as(references.body()).isEqualTo(200);
+        assertThat(references.body()).doesNotContain("CONSENT_BLOCKED", "rightsBasis", "studentConsentId");
         assertThat(http("GET", "/api/admin/director-profile/drafts/" + draftId + "/preview?version=1",
-                ownerCookie, null, null).body()).contains("adminPreview", "publicProfile", "비공개 경력");
+                ownerCookie, null, null).body()).contains("adminPreview", "publicProfile", "밝고 쾌적한 교실입니다.");
         String publication = "{\"draftId\":\"" + draftId + "\",\"draftVersion\":1}";
         UUID key = UUID.randomUUID();
         HttpResponse<String> published = httpWithKey("POST", "/api/admin/director-profile/publications",
@@ -646,8 +732,8 @@ class AuthPersistenceIntegrationTest {
                 .isEqualTo(200);
         HttpResponse<String> publicProfile = http("GET", "/api/public/director-profile", null, null, null);
         assertThat(publicProfile.statusCode()).isEqualTo(200);
-        assertThat(publicProfile.body()).contains("이원장", "아동미술 교육")
-                .doesNotContain("비공개 경력", "hidden", "profileId", "draftId", "version");
+        assertThat(publicProfile.body()).contains("이원장", "아동미술 교육", "다양한 재료로 표현하는 교습소입니다.", "미술 재료가 놓인 교실")
+                .doesNotContain("rightsBasis", "studentConsentId", "profileId", "draftId", "version");
     }
 
     @Test

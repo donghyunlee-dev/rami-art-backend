@@ -102,15 +102,9 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'HOME_PAGE_CONTENT' then exists(select 1 from home_page_content x where x.id=r.owner_id and x.status='PUBLISHED')
                          when 'DIRECTOR_PROFILE' then exists(
                            select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED' and (
-                             (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id
-                               and (p.portrait_student_consent_id is null or exists(
-                               select 1 from student_consent c where c.id=p.portrait_student_consent_id and c.policy_type='MEDIA_PUBLICATION' and c.status='ACTIVE'
-                                 and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date))))
-                             or exists(select 1 from director_facility f where f.director_profile_id=p.id and f.visible
-                               and f.media_asset_id=r.asset_id and r.field_name=('facilityImage:' || f.id::text)
-                               and (f.student_consent_id is null or exists(select 1 from student_consent c where c.id=f.student_consent_id and c.policy_type='MEDIA_PUBLICATION'
-                                 and c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date)))
-                             )
+                             (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id)
+                             or exists(select 1 from director_studio_image i where i.director_profile_id=p.id
+                               and i.media_asset_id=r.asset_id and r.field_name=('studioImage:' || i.id::text))
                            ))
                          else false
                        end currently_public,
@@ -146,18 +140,10 @@ public class JdbcMediaRepository implements MediaRepository {
                          when 'DIRECTOR_PROFILE' then case
                            when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED') and exists(
                              select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED' and (
-                               (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id
-                                 and (p.portrait_student_consent_id is null or exists(
-                                 select 1 from student_consent c where c.id=p.portrait_student_consent_id and c.policy_type='MEDIA_PUBLICATION' and c.status='ACTIVE'
-                                   and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date))))
-                               or exists(select 1 from director_facility f where f.director_profile_id=p.id and f.visible
-                                 and f.media_asset_id=r.asset_id and r.field_name=('facilityImage:' || f.id::text)
-                                 and (f.student_consent_id is null or exists(select 1 from student_consent c where c.id=f.student_consent_id and c.policy_type='MEDIA_PUBLICATION'
-                                   and c.status='ACTIVE' and (c.expires_on is null or c.expires_on >= (statement_timestamp() at time zone 'Asia/Seoul')::date)))
-                               )
+                               (r.field_name='portrait' and p.portrait_media_asset_id=r.asset_id)
+                               or exists(select 1 from director_studio_image i where i.director_profile_id=p.id
+                                 and i.media_asset_id=r.asset_id and r.field_name=('studioImage:' || i.id::text))
                              )) then 'PUBLIC'
-                           when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='PUBLISHED')
-                             and (r.field_name='portrait' or r.field_name like 'facilityImage:%') then 'CONSENT_BLOCKED'
                            when exists(select 1 from director_profile p where p.id=r.owner_id and p.status='DRAFT') then 'DRAFT'
                            else 'ARCHIVED' end
                          else 'ARCHIVED'
