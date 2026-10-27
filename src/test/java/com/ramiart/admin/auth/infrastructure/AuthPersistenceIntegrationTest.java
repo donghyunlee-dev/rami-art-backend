@@ -507,7 +507,7 @@ class AuthPersistenceIntegrationTest {
 
     @Test
     void consentHttpEndpointsRequireReadAndWritePermissions() throws Exception {
-        assertThat(jdbcTemplate.queryForObject("select to_regclass('public.consent_policy')::text",String.class)).isEqualTo("consent_policy");
+        assertThat(jdbcTemplate.queryForObject("select exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='rami_art_studio' and c.relname='consent_policy')",Boolean.class)).isTrue();
         createRoleUser("OWNER","consent-owner@rami.local");
         createRoleUser("CONTENT","consent-content@rami.local");
         String ownerCookie="__Host-rami_admin_session="+authSessionService.login("consent-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_consent_owner")).rawToken();
@@ -560,7 +560,7 @@ class AuthPersistenceIntegrationTest {
 
     @Test
     void notificationRoutesRequirePermissionsAndManualQueueStoresEncryptedSnapshot() throws Exception {
-        assertThat(jdbcTemplate.queryForObject("select to_regclass('public.notification_message')::text",String.class)).isEqualTo("notification_message");
+        assertThat(jdbcTemplate.queryForObject("select exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='rami_art_studio' and c.relname='notification_message')",Boolean.class)).isTrue();
         createRoleUser("OWNER","notification-owner@rami.local");
         createRoleUser("CONTENT","notification-content@rami.local");
         String ownerCookie="__Host-rami_admin_session="+authSessionService.login("notification-owner@rami.local",TEMPORARY_PASSWORD,null,metadata("req_notification_owner")).rawToken();
@@ -618,7 +618,7 @@ class AuthPersistenceIntegrationTest {
                  "addressDetail":"","latitude":37.123456,"longitude":127.123456,
                  "businessHours":[{"day":1,"closed":false,"open":"10:00","close":"19:00"},
                                    {"day":7,"closed":true,"open":null,"close":null}],
-                 "closedDays":"","transitGuide":"2번 출구 도보 5분","parkingGuide":""}
+                 "closedDays":"","transitGuide":"2번 출구 도보 5분","parkingGuide":"","faqs":[]}
                 """;
         HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/studio-profile/drafts/" + draftId,
                 cookie, content, UUID.randomUUID());
@@ -1739,7 +1739,7 @@ class AuthPersistenceIntegrationTest {
                                 Boolean.class, role, "rami_art_studio." + table)).isFalse();
                         assertThat(jdbcTemplate.queryForObject(
                                 "select rowsecurity from pg_tables where schemaname = 'rami_art_studio' and tablename = ?",
-                                Boolean.class, table)).isTrue();
+                                Boolean.class, table)).as("row level security: " + table).isTrue();
                     }
                     statement.execute("grant usage on schema rami_art_studio to " + role);
                     statement.execute("grant select on all tables in schema rami_art_studio to " + role);

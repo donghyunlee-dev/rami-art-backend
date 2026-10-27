@@ -118,7 +118,9 @@ public class JdbcMediaRepository implements MediaRepository {
     public List<AssetReferenceRow> references(List<UUID> ids) {
         if (ids.isEmpty()) return List.of();
         return jdbc.sql("""
-                select r.asset_id, r.owner_type, r.owner_id revision_id, r.field_name, r.reference_state,
+                select r.asset_id, r.owner_type, r.owner_id revision_id,
+                       case when r.owner_type='CLASS_PROGRAM' then (select x.revision from class_program x where x.id=r.owner_id) end revision_number,
+                       r.field_name, r.reference_state,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then (select x.artwork_id from gallery_artwork x where x.id=r.owner_id)
                          when 'BLOG_POST' then (select x.post_id from blog_post x where x.id=r.owner_id)
@@ -200,7 +202,7 @@ public class JdbcMediaRepository implements MediaRepository {
                 """)
                 .param("ids", ids).query((rs, ignored) -> new AssetReferenceRow(rs.getObject("asset_id", UUID.class),
                         new AssetReference(rs.getString("owner_type"), rs.getObject("target_id", UUID.class),
-                                rs.getObject("revision_id", UUID.class), rs.getString("field_name"),
+                                rs.getObject("revision_id", UUID.class), (Integer) rs.getObject("revision_number"), rs.getString("field_name"),
                                 rs.getString("reference_state"), rs.getString("title"), rs.getString("public_state"),
                                 rs.getBoolean("currently_public"))))
                 .list();

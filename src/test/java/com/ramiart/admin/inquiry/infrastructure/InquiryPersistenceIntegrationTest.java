@@ -9,6 +9,8 @@ import com.ramiart.admin.inquiry.application.InquiryException;
 import com.ramiart.admin.inquiry.application.InquiryModels.*;
 import com.ramiart.admin.inquiry.application.InquiryRateLimiter;
 import com.ramiart.admin.inquiry.application.InquiryService;
+import com.ramiart.admin.privacy.application.PublicPrivacyPolicyService;
+import com.ramiart.admin.privacy.infrastructure.JdbcPublicPrivacyPolicyRepository;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,7 +46,8 @@ class InquiryPersistenceIntegrationTest {
     JdbcTemplate jdbc;
 
     @Configuration(proxyBeanMethods=false) @EnableAutoConfiguration
-    @Import({InquiryService.class,InquiryRateLimiter.class,JdbcInquiryRepository.class,AesGcmInquiryDataProtector.class,JdbcAuditRecorder.class})
+    @Import({InquiryService.class,InquiryRateLimiter.class,JdbcInquiryRepository.class,AesGcmInquiryDataProtector.class,
+            JdbcAuditRecorder.class,PublicPrivacyPolicyService.class,JdbcPublicPrivacyPolicyRepository.class})
     static class Config { @Bean java.time.Clock clock(){return java.time.Clock.systemUTC();} }
 
     @DynamicPropertySource static void properties(DynamicPropertyRegistry r){

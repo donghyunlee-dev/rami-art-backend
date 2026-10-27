@@ -38,6 +38,14 @@ public class ClassProgramService {
         if(repository.save(id,write)!=1)throw new ClassProgramException("CLASS_PROGRAM_VERSION_CONFLICT");repository.saveReferences(id,write.mediaAssetId());repository.complete(scope,key,id,200);
         audit(actor,meta,"UPDATE_DRAFT",id,Map.of("version",write.version()+1));return itemForCourse(courseId); }
     @Transactional(readOnly=true) public Preview preview(Authentication auth){require(auth,"CONTENT_PROGRAM_READ");return new Preview(repository.findAll().stream().map(this::item).toList());}
+    @Transactional(readOnly=true) public ProgramRevisionDetail revision(UUID revisionId, Authentication auth) {
+        require(auth, "CONTENT_PROGRAM_READ");
+        Stored stored = repository.find(revisionId).orElseThrow(() -> new ClassProgramException("CLASS_PROGRAM_COURSE_NOT_FOUND"));
+        CourseView course = new CourseView(stored.courseId(), stored.courseCode(), stored.courseName(),
+                stored.currentAudienceLabel(), stored.currentSessionDurationMinutes(), stored.currentWeeklySessions(),
+                stored.sourceCourseVersion(), stored.courseActive());
+        return new ProgramRevisionDetail(course, revision(stored), stored.status(), media(stored));
+    }
     @Transactional public Mutation<Publication> publish(PublishRequest body,UUID key,Authentication auth,RequestMetadata meta){UUID actor=require(auth,"CONTENT_PROGRAM_WRITE");if(body==null||body.draftId()==null||body.version()==null)throw new ClassProgramException("VALIDATION_ERROR");
         Stored draft=repository.find(body.draftId()).orElseThrow(()->new ClassProgramException("CLASS_PROGRAM_COURSE_NOT_FOUND"));String scope=actor+":CLASS_PROGRAM_PUBLISH:"+draft.courseId();String reqHash=hash(body.toString());
         var claim=repository.claim(scope,key,reqHash);if(!claim.claimed()){Stored prior=repository.find(claim.resourceId()).orElseThrow();return new Mutation<>(publication(prior),true);}

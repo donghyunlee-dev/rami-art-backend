@@ -47,4 +47,29 @@ class ClassProgramServiceTest {
                 assertThat(media.get("publicUrl")).isEqualTo(
                         "https://rami-art-backend.onrender.com/media/2026/10/b57034ea-3a0d-41ca-838b-a4a6e76c18b0.jpg"));
     }
+
+    @Test
+    void revisionReturnsTheRequestedArchivedRevisionAndItsMedia() {
+        ClassProgramRepository repository = mock(ClassProgramRepository.class);
+        Stored archived = new Stored(PROGRAM_ID, COURSE_ID, 2, "ARCHIVED", true, "5~7세",
+                "이전 리비전", "설명", List.of("활동"), 80, 1, 2,
+                "5~7세", 80, 1, true, ASSET_ID, "https://cdn.example.test/preschool.jpg", "대체 텍스트", 0, 4,
+                Instant.parse("2026-10-22T00:00:00Z"), Instant.parse("2026-10-20T00:00:00Z"),
+                "COURSE_78ACF196", "유치부", true, "image/jpeg", 128000, 800, 600,
+                Instant.parse("2026-10-29T00:00:00Z"));
+        when(repository.find(PROGRAM_ID)).thenReturn(java.util.Optional.of(archived));
+        var authentication = new UsernamePasswordAuthenticationToken(ACTOR_ID.toString(), "",
+                List.of(new SimpleGrantedAuthority("CONTENT_PROGRAM_READ")));
+        var service = new ClassProgramService(repository, mock(AuditRecorder.class), Clock.systemUTC(),
+                new MediaUrlResolver("https://rami-art-backend.onrender.com/"));
+
+        ProgramRevisionDetail detail = service.revision(PROGRAM_ID, authentication);
+
+        assertThat(detail.status()).isEqualTo("ARCHIVED");
+        assertThat(detail.revision().id()).isEqualTo(PROGRAM_ID);
+        assertThat(detail.revision().revision()).isEqualTo(2);
+        assertThat(detail.revision().mediaAssetId()).isEqualTo(ASSET_ID);
+        assertThat(detail.media()).isInstanceOfSatisfying(java.util.Map.class, media ->
+                assertThat(media.get("publicUrl")).isEqualTo("https://cdn.example.test/preschool.jpg"));
+    }
 }

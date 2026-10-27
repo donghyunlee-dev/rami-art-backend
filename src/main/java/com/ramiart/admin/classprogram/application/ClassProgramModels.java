@@ -29,6 +29,7 @@ public final class ClassProgramModels {
             Integer sessionDurationMinutes, Integer weeklySessions, long version, boolean active) {}
     public record ProgramItem(CourseView course, ProgramRevision currentPublished, ProgramRevision draft,
             Object media, List<String> actions) {}
+    public record ProgramRevisionDetail(CourseView course, ProgramRevision revision, String status, Object media) {}
     public record PublishValidation(int visibleCount, List<Integer> orderConflicts, List<String> mediaErrors) {}
     public record ProgramList(List<ProgramItem> items, PublishValidation publishValidation) {}
     public record PublicProgram(UUID courseId, String courseCode, String courseName, String audienceLabel,
