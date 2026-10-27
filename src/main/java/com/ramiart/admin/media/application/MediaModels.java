@@ -2,6 +2,7 @@ package com.ramiart.admin.media.application;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 public final class MediaModels {
     private MediaModels() {
@@ -21,6 +22,16 @@ public final class MediaModels {
 
     public record AssetReference(String ownerType, UUID targetId, UUID revisionId, String fieldName,
             String referenceState, String title, String publicState, boolean currentlyPublic) {
+    }
+
+    public record MediaLibraryItem(MediaAsset asset, Instant createdAt, long referenceCount,
+            List<AssetReference> references) {
+    }
+
+    public record MediaAssetPage(List<MediaLibraryItem> items, int page, int size, long totalItems) {
+    }
+
+    public record AssetReferenceRow(UUID assetId, AssetReference reference) {
     }
 
     public record RequestMetadata(String requestId, String ipAddress, String userAgent) {

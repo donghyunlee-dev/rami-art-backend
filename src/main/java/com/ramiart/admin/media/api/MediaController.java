@@ -3,6 +3,7 @@ package com.ramiart.admin.media.api;
 import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.media.application.MediaModels.MediaAsset;
+import com.ramiart.admin.media.application.MediaModels.MediaAssetPage;
 import com.ramiart.admin.media.application.MediaModels.AssetReference;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaService;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,6 +41,17 @@ public final class MediaController {
 
     public MediaController(MediaService service) {
         this.service = service;
+    }
+
+    @GetMapping
+    ResponseEntity<ApiEnvelope<MediaAssetPage>> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "24") int size,
+            @RequestParam(defaultValue = "") String keyword,
+            @RequestParam(defaultValue = "ALL") String usage,
+            Authentication authentication, HttpServletRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiEnvelope.success(service.list(page, size, keyword, usage, authentication), RequestIdFilter.get(request)));
     }
 
     @PostMapping

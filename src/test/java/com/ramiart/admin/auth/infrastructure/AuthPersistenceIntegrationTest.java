@@ -750,7 +750,7 @@ class AuthPersistenceIntegrationTest {
                 "class-program-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_class_program_owner")).rawToken();
         UUID actor = UUID.nameUUIDFromBytes("test-admin-OWNER".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         UUID course = UUID.randomUUID();
-        jdbcTemplate.update("insert into course(id,code,name,display_order,active,created_by,updated_by) values(?,?,?,0,true,?,?)",
+        jdbcTemplate.update("insert into course(id,code,name,age_guide,session_duration_minutes,weekly_sessions,display_order,active,created_by,updated_by) values(?,?,?,'초등',50,1,0,true,?,?)",
                 course, "ART_HTTP", "HTTP 미술 과정", actor, actor);
         HttpResponse<String> list = http("GET", "/api/admin/content/class-programs", cookie, null, null);
         assertThat(list.statusCode()).isEqualTo(200);
@@ -759,12 +759,12 @@ class AuthPersistenceIntegrationTest {
         assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
         UUID draft = UUID.fromString(new com.fasterxml.jackson.databind.ObjectMapper().readTree(created.body()).path("data").path("draft").path("id").asText());
         UUID asset = UUID.fromString("" + jdbcTemplate.queryForObject("select id from media_asset where storage_key='seed/generic-brand-share.png'", UUID.class));
-        String emptyDraft = "{\"version\":0,\"audienceLabel\":\"\",\"title\":\"\",\"description\":\"\",\"activities\":[\"\"],\"mediaAssetId\":null,\"altText\":\"\",\"visible\":false,\"displayOrder\":0}";
+        String emptyDraft = "{\"version\":0,\"title\":\"\",\"description\":\"\",\"activities\":[\"\"],\"mediaAssetId\":null,\"altText\":\"\",\"visible\":false,\"displayOrder\":0}";
         HttpResponse<String> incomplete = httpWithKey("PUT", "/api/admin/content/class-programs/" + course + "/drafts/" + draft,
                 cookie, emptyDraft, UUID.randomUUID());
         assertThat(incomplete.statusCode()).as(incomplete.body()).isEqualTo(200);
         assertThat(incomplete.body()).contains("\"version\":1");
-        String save = "{\"version\":0,\"audienceLabel\":\"초등\",\"title\":\"색과 형태\",\"description\":\"표현 활동\",\"activities\":[\"관찰\",\"그리기\"],\"mediaAssetId\":\"" + asset + "\",\"altText\":\"작품 이미지\",\"visible\":true,\"displayOrder\":0}";
+        String save = "{\"version\":0,\"title\":\"색과 형태\",\"description\":\"표현 활동\",\"activities\":[\"관찰\",\"그리기\"],\"mediaAssetId\":\"" + asset + "\",\"altText\":\"작품 이미지\",\"visible\":true,\"displayOrder\":0}";
         save = save.replace("\"version\":0", "\"version\":1");
         HttpResponse<String> saved = httpWithKey("PUT", "/api/admin/content/class-programs/" + course + "/drafts/" + draft,
                 cookie, save, UUID.randomUUID());
@@ -779,6 +779,35 @@ class AuthPersistenceIntegrationTest {
         HttpResponse<String> publicRead = http("GET", "/api/public/class-programs", null, null, null);
         assertThat(publicRead.statusCode()).isEqualTo(200);
         assertThat(publicRead.body()).contains("색과 형태", "작품 이미지", "ART_HTTP").doesNotContain("DRAFT", "mediaAssetId", "version");
+    }
+
+    @Test
+    void mediaLibraryListsAssetMetadataAndEveryDatabaseReferenceForReuse() throws Exception {
+        createRoleUser("OWNER", "media-library-owner@rami.local");
+        createRoleUser("OPERATOR", "media-library-operator@rami.local");
+        String cookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "media-library-owner@rami.local", TEMPORARY_PASSWORD, null, metadata("req_media_library_owner")).rawToken();
+        String operatorCookie = "__Host-rami_admin_session=" + authSessionService.login(
+                "media-library-operator@rami.local", TEMPORARY_PASSWORD, null, metadata("req_media_library_operator")).rawToken();
+        assertThat(http("GET", "/api/admin/media-assets", operatorCookie, null, null).statusCode()).isEqualTo(403);
+        UUID asset = jdbcTemplate.queryForObject("select id from media_asset where storage_key='seed/generic-brand-share.png'", UUID.class);
+        UUID owner = UUID.randomUUID();
+        jdbcTemplate.update("insert into media_asset_reference(asset_id,owner_type,owner_id,field_name,reference_state) values(?,'SITE_BRAND_CONFIG',?,'shareImage','DRAFT')",
+                asset, owner);
+        UUID secondOwner = UUID.randomUUID();
+        jdbcTemplate.update("insert into media_asset_reference(asset_id,owner_type,owner_id,field_name,reference_state) values(?,'HOME_PAGE_CONTENT',?,'heroImage','DRAFT')",
+                asset, secondOwner);
+
+        HttpResponse<String> listed = http("GET", "/api/admin/media-assets?page=0&size=24&usage=ALL", cookie, null, null);
+
+        assertThat(listed.statusCode()).as(listed.body()).isEqualTo(200);
+        assertThat(listed.body()).contains("\"items\"", asset.toString(), "\"referenceCount\":2",
+                "SITE_BRAND_CONFIG", "shareImage", "HOME_PAGE_CONTENT", "heroImage");
+        HttpResponse<String> unused = http("GET", "/api/admin/media-assets?usage=UNUSED", cookie, null, null);
+        assertThat(unused.statusCode()).isEqualTo(200);
+        assertThat(unused.body()).doesNotContain(asset.toString());
+        HttpResponse<String> invalid = http("GET", "/api/admin/media-assets?size=0", cookie, null, null);
+        assertThat(invalid.statusCode()).isEqualTo(400);
     }
 
     @Test

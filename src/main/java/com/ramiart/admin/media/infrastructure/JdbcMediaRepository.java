@@ -3,6 +3,7 @@ package com.ramiart.admin.media.infrastructure;
 import com.ramiart.admin.media.application.MediaException;
 import com.ramiart.admin.media.application.MediaModels.StoredAsset;
 import com.ramiart.admin.media.application.MediaModels.AssetReference;
+import com.ramiart.admin.media.application.MediaModels.AssetReferenceRow;
 import com.ramiart.admin.media.application.MediaRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -70,9 +71,54 @@ public class JdbcMediaRepository implements MediaRepository {
     }
 
     @Override
-    public List<AssetReference> references(UUID id) {
+    public List<LibraryAsset> listAssets(String keyword, String usage, int limit, long offset) {
         return jdbc.sql("""
-                select r.owner_type, r.owner_id revision_id, r.field_name, r.reference_state,
+                        select a.id, a.storage_key, a.public_path, a.original_file_name, a.sha256, a.mime_type,
+                               a.file_size, a.width, a.height, a.expires_at, a.created_at,
+                               (select count(*) from media_asset_reference r where r.asset_id=a.id) reference_count
+                          from media_asset a
+                         where a.status='READY' and a.storage_key not like 'private-evidence/%'
+                           and (:keyword='' or a.original_file_name ilike '%' || :keyword || '%')
+                           and (:usage='ALL'
+                             or (:usage='USED' and exists(select 1 from media_asset_reference r where r.asset_id=a.id))
+                             or (:usage='UNUSED' and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)))
+                         order by a.created_at desc, a.id desc
+                         limit :limit offset :offset
+                        """)
+                .param("keyword", keyword).param("usage", usage).param("limit", limit).param("offset", offset)
+                .query((rs, ignored) -> new LibraryAsset(
+                        new StoredAsset(rs.getObject("id", UUID.class), rs.getString("storage_key"),
+                                rs.getString("public_path"), rs.getString("original_file_name"), rs.getString("sha256"),
+                                rs.getString("mime_type"), rs.getLong("file_size"), rs.getInt("width"),
+                                rs.getInt("height"), rs.getObject("expires_at", java.time.OffsetDateTime.class).toInstant()),
+                        rs.getObject("created_at", java.time.OffsetDateTime.class).toInstant(), rs.getLong("reference_count")))
+                .list();
+    }
+
+    @Override
+    public long countAssets(String keyword, String usage) {
+        return jdbc.sql("""
+                        select count(*)
+                          from media_asset a
+                         where a.status='READY' and a.storage_key not like 'private-evidence/%'
+                           and (:keyword='' or a.original_file_name ilike '%' || :keyword || '%')
+                           and (:usage='ALL'
+                             or (:usage='USED' and exists(select 1 from media_asset_reference r where r.asset_id=a.id))
+                             or (:usage='UNUSED' and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)))
+                        """)
+                .param("keyword", keyword).param("usage", usage).query(Long.class).single();
+    }
+
+    @Override
+    public List<AssetReference> references(UUID id) {
+        return references(List.of(id)).stream().map(AssetReferenceRow::reference).toList();
+    }
+
+    @Override
+    public List<AssetReferenceRow> references(List<UUID> ids) {
+        if (ids.isEmpty()) return List.of();
+        return jdbc.sql("""
+                select r.asset_id, r.owner_type, r.owner_id revision_id, r.field_name, r.reference_state,
                        case r.owner_type
                          when 'GALLERY_ARTWORK' then (select x.artwork_id from gallery_artwork x where x.id=r.owner_id)
                          when 'BLOG_POST' then (select x.post_id from blog_post x where x.id=r.owner_id)
@@ -149,14 +195,14 @@ public class JdbcMediaRepository implements MediaRepository {
                          else 'ARCHIVED'
                        end public_state
                   from media_asset_reference r
-                 where r.asset_id=:id and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG','HOME_PAGE_CONTENT','DIRECTOR_PROFILE')
-                 order by currently_public desc, r.owner_type, r.owner_id
+                 where r.asset_id in (:ids) and r.owner_type in ('GALLERY_ARTWORK','BLOG_POST','CLASS_PROGRAM','SITE_BRAND_CONFIG','HOME_PAGE_CONTENT','DIRECTOR_PROFILE')
+                 order by r.asset_id, currently_public desc, r.owner_type, r.owner_id
                 """)
-                .param("id", id).query((rs, ignored) -> new AssetReference(
-                        rs.getString("owner_type"), rs.getObject("target_id", UUID.class),
-                        rs.getObject("revision_id", UUID.class), rs.getString("field_name"),
-                        rs.getString("reference_state"), rs.getString("title"), rs.getString("public_state"),
-                        rs.getBoolean("currently_public")))
+                .param("ids", ids).query((rs, ignored) -> new AssetReferenceRow(rs.getObject("asset_id", UUID.class),
+                        new AssetReference(rs.getString("owner_type"), rs.getObject("target_id", UUID.class),
+                                rs.getObject("revision_id", UUID.class), rs.getString("field_name"),
+                                rs.getString("reference_state"), rs.getString("title"), rs.getString("public_state"),
+                                rs.getBoolean("currently_public"))))
                 .list();
     }
 

@@ -260,6 +260,8 @@ public class SecurityConfiguration {
                                 .hasAuthority("STAFF_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/media-assets")
                                 .hasAuthority("MEDIA_WRITE")
+                        .requestMatchers(HttpMethod.GET, "/api/admin/media-assets")
+                                .hasAuthority("MEDIA_WRITE")
                         .requestMatchers(HttpMethod.POST, "/api/admin/media-assets/*/client-events")
                                 .hasAuthority("MEDIA_WRITE")
                         .requestMatchers(HttpMethod.GET, "/api/admin/media-assets/*/references")

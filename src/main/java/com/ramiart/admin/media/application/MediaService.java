@@ -3,6 +3,8 @@ package com.ramiart.admin.media.application;
 import com.ramiart.admin.auth.application.AuditRecorder;
 import com.ramiart.admin.auth.application.AuditRecorder.Event;
 import com.ramiart.admin.media.application.MediaModels.MediaAsset;
+import com.ramiart.admin.media.application.MediaModels.MediaAssetPage;
+import com.ramiart.admin.media.application.MediaModels.MediaLibraryItem;
 import com.ramiart.admin.media.application.MediaModels.AssetReference;
 import com.ramiart.admin.media.application.MediaModels.RequestMetadata;
 import com.ramiart.admin.media.application.MediaModels.StoredAsset;
@@ -17,7 +19,9 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -105,6 +109,27 @@ public final class MediaService {
         require(authentication, "MEDIA_WRITE");
         if (repository.find(assetId).isEmpty()) throw new MediaException("MEDIA_ASSET_NOT_FOUND");
         return repository.references(assetId);
+    }
+
+    public MediaAssetPage list(int page, int size, String keyword, String usage, Authentication authentication) {
+        require(authentication, "MEDIA_WRITE");
+        String query = keyword == null ? "" : keyword.trim();
+        String normalizedUsage = usage == null ? "ALL" : usage.trim().toUpperCase(java.util.Locale.ROOT);
+        if (page < 0 || size < 1 || size > 100 || query.length() > 100
+                || !java.util.Set.of("ALL", "USED", "UNUSED").contains(normalizedUsage)) {
+            throw new MediaException("MEDIA_LIBRARY_QUERY_INVALID");
+        }
+
+        long totalItems = repository.countAssets(query, normalizedUsage);
+        List<MediaRepository.LibraryAsset> assets = repository.listAssets(query, normalizedUsage, size, (long) page * size);
+        Map<UUID, List<AssetReference>> references = repository.references(assets.stream()
+                        .map(item -> item.asset().id()).toList()).stream()
+                .collect(Collectors.groupingBy(MediaModels.AssetReferenceRow::assetId,
+                        Collectors.mapping(MediaModels.AssetReferenceRow::reference, Collectors.toList())));
+        List<MediaLibraryItem> items = assets.stream().map(item -> new MediaLibraryItem(
+                response(item.asset()), item.createdAt(), item.referenceCount(),
+                references.getOrDefault(item.asset().id(), List.of()))).toList();
+        return new MediaAssetPage(items, page, size, totalItems);
     }
 
     public int cleanupExpired(int limit) {
