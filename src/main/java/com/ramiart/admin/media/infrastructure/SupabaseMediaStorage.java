@@ -4,11 +4,14 @@ import com.ramiart.admin.media.application.MediaException;
 import com.ramiart.admin.media.application.MediaStorage;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -55,8 +58,12 @@ public final class SupabaseMediaStorage implements MediaStorage {
     public void delete(String key) {
         check(key);
         try {
-            client.delete().uri(objectUrl(key)).header("apikey", serviceKey)
+            client.method(HttpMethod.DELETE)
+                    .uri(baseUrl + "/storage/v1/object/" + encode(bucket))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("apikey", serviceKey)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + serviceKey)
+                    .body(Map.of("prefixes", List.of(key)))
                     .retrieve().toBodilessEntity();
         } catch (HttpClientErrorException.NotFound ignored) {
             // A missing object is already in the requested deleted state.
