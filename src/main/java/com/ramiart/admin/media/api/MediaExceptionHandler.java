@@ -5,6 +5,8 @@ import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.media.application.MediaException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -12,13 +14,24 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(basePackageClasses = MediaController.class)
 public final class MediaExceptionHandler {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MediaExceptionHandler.class);
+
     @ExceptionHandler(MediaException.class)
     ResponseEntity<ApiEnvelope<Void>> media(MediaException exception, HttpServletRequest request) {
+        if ("MEDIA_STORAGE_FAILED".equals(exception.code())) {
+            Throwable cause = exception.getCause();
+            Integer upstreamStatus = cause instanceof RestClientResponseException responseException
+                    ? responseException.getStatusCode().value() : null;
+            LOGGER.error("media_storage_failed requestId={} method={} path={} causeType={} upstreamStatus={}",
+                    RequestIdFilter.get(request), request.getMethod(), request.getRequestURI(),
+                    cause == null ? "none" : cause.getClass().getSimpleName(), upstreamStatus);
+        }
         Definition definition = definition(exception.code());
         return ResponseEntity.status(definition.status()).body(ApiEnvelope.failure(
                 exception.code(), definition.message(), List.of(), RequestIdFilter.get(request)));
