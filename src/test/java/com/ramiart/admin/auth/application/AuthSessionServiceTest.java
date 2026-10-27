@@ -121,6 +121,20 @@ class AuthSessionServiceTest {
     }
 
     @Test
+    void routesMediaOnlyAdministratorsToTheMediaScreen() {
+        AdminAccount account = account(false);
+        StoredSession stored = new StoredSession(
+                SESSION_ID, account, ROLE_ID, "CONTENT", policy,
+                NOW.plus(Duration.ofHours(12)), NOW.plus(Duration.ofHours(1)), null);
+        when(repository.findSession(any(), eq(false))).thenReturn(Optional.of(stored));
+        when(repository.findPermissions(ROLE_ID)).thenReturn(List.of("MEDIA_WRITE"));
+
+        AuthSessionService.CurrentContext result = service.current("raw-session-token");
+
+        assertThat(result.firstAllowedPath()).isEqualTo("/admin/content/media");
+    }
+
+    @Test
     void forcesPasswordChangeRouteWhileKeepingRolePermissions() {
         AdminAccount account = account(true);
         StoredSession stored = new StoredSession(

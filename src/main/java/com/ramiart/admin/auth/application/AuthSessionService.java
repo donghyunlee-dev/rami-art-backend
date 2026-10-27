@@ -197,6 +197,7 @@ public class AuthSessionService {
         routes.put("FINANCE_READ", "/admin/finance/ledger");
         routes.put("CONTENT_PROFILE_READ", "/admin/content/studio-profile?mode=published");
         routes.put("CONTENT_PROGRAM_READ", "/admin/content/class-programs");
+        routes.put("MEDIA_WRITE", "/admin/content/media");
         routes.put("GALLERY_READ", "/admin/content/gallery");
         routes.put("BLOG_READ", "/admin/content/blog");
         routes.put("SITE_BRAND_READ", "/admin/settings/brand");
