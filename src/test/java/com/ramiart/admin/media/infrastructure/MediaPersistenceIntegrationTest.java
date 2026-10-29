@@ -141,6 +141,17 @@ class MediaPersistenceIntegrationTest {
     }
 
     @Test
+    void siteBrandPlaceholderAssetsCannotBeDeleted() {
+        UUID actor = actor();
+        UUID logoId = jdbc.queryForObject(
+                "select id from media_asset where storage_key='seed/generic-brand-logo.png'", UUID.class);
+
+        assertThatThrownBy(() -> service.delete(logoId, actor, UUID.randomUUID(), metadata()))
+                .isInstanceOf(MediaException.class).extracting("code").isEqualTo("MEDIA_ASSET_IN_USE");
+        assertThat(jdbc.queryForObject("select count(*) from media_asset where id=?", Integer.class, logoId)).isOne();
+    }
+
+    @Test
     void referencesShowCurrentPublicContentAndKeepPrivateOwnersOutOfResults() throws Exception {
         UUID actor = actor();
         var asset = service.upload(png(12, 12), "artwork.png", "image/png", actor, UUID.randomUUID(), metadata());

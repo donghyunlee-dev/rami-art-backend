@@ -82,6 +82,25 @@ class SiteBrandPersistenceIntegrationTest {
         assertThat(service.publicBrand().brandName()).isEqualTo("Studio");
     }
 
+    @Test void missingPlaceholderAssetsAreRestoredBeforeFirstDraftCreation() throws Exception {
+        UUID actor = jdbc.queryForObject("select id from admin_user limit 1", UUID.class);
+        jdbc.update("delete from media_asset where storage_key in (?, ?)",
+                "seed/generic-brand-logo.png", "seed/generic-brand-favicon.png");
+
+        PostgresScriptRunner.execute(dataSource,
+                projectRoot().resolve("supabase/migrations/202610290001_restore_site_brand_placeholder_assets.sql"));
+        PostgresScriptRunner.execute(dataSource,
+                projectRoot().resolve("supabase/migrations/202610290001_restore_site_brand_placeholder_assets.sql"));
+
+        var draft = service.createDraft(actor, UUID.randomUUID(),
+                new SiteBrandService.RequestMetadata("req_brand_repair", "127.0.0.1", "integration"));
+
+        assertThat(draft.status()).isEqualTo("DRAFT");
+        assertThat(draft.logoAssetId()).isNotNull();
+        assertThat(draft.faviconAssetId()).isNotNull();
+        assertThat(draft.logo().url()).contains("/seed/generic-brand-logo.png");
+    }
+
     private BrandWrite sample(Long version) {
         UUID logo = jdbc.queryForObject("select id from media_asset where storage_key='seed/generic-brand-logo.png'", UUID.class);
         UUID icon = jdbc.queryForObject("select id from media_asset where storage_key='seed/generic-brand-favicon.png'", UUID.class);

@@ -229,6 +229,7 @@ public class JdbcMediaRepository implements MediaRepository {
                         select a.id, a.storage_key
                           from media_asset a
                          where a.id=:id and a.status='READY' and a.storage_key not like 'private-evidence/%'
+                           and a.storage_key not like 'seed/generic-brand-%'
                            and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)
                          for update
                         """)
@@ -240,6 +241,7 @@ public class JdbcMediaRepository implements MediaRepository {
     public int deleteLocked(UUID id) {
         return jdbc.sql("""
                         delete from media_asset a where a.id=:id
+                          and a.storage_key not like 'seed/generic-brand-%'
                           and not exists(select 1 from media_asset_reference r where r.asset_id=a.id)
                         """).param("id", id).update();
     }

@@ -4,9 +4,11 @@ import com.ramiart.admin.common.api.ApiEnvelope;
 import com.ramiart.admin.common.api.RequestIdFilter;
 import com.ramiart.admin.sitebrand.application.SiteBrandException;
 import jakarta.servlet.http.HttpServletRequest;
+import java.sql.SQLException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
@@ -33,8 +35,10 @@ public class SiteBrandExceptionHandler {
 
     @ExceptionHandler(DataAccessException.class)
     ResponseEntity<ApiEnvelope<Void>> persistence(DataAccessException exception,HttpServletRequest request) {
-        LOGGER.error("Site brand persistence failed: requestId={}, method={}, path={}",
-                RequestIdFilter.get(request),request.getMethod(),request.getRequestURI());
+        Throwable cause = NestedExceptionUtils.getMostSpecificCause(exception);
+        String sqlState = cause instanceof SQLException sqlException ? sqlException.getSQLState() : null;
+        LOGGER.error("Site brand persistence failed: requestId={}, method={}, path={}, cause={}, sqlState={}",
+                RequestIdFilter.get(request),request.getMethod(),request.getRequestURI(),cause.getClass().getSimpleName(),sqlState);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(ApiEnvelope.failure("SITE_BRAND_PERSISTENCE_FAILED","사이트 브랜드 요청을 처리하지 못했습니다.",List.of(),RequestIdFilter.get(request)));
     }
