@@ -45,7 +45,7 @@ class AdminSchemaConsolidationMigrationTest {
 
     @Test
     void currentAdministratorObjectsEndInRamiSchemaWithReferenceDataAndPolicies() throws Exception {
-        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("scripts/verify-admin-schema.sql"));
+        PostgresScriptRunner.execute(dataSource, verifyAdminSchemaScript());
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
         assertThat(jdbc.queryForObject("select count(*) from rami_art_studio.admin_role", Integer.class)).isEqualTo(4);
@@ -61,9 +61,9 @@ class AdminSchemaConsolidationMigrationTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("alter table rami_art_studio.admin_auth_rate_limit set schema public");
         }
-        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V8__remove_unused_legacy_schema_objects.sql"));
-        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("backend/src/main/resources/db/migration/V9__restore_backend_entity_tables.sql"));
-        PostgresScriptRunner.execute(dataSource, projectRoot().resolve("scripts/verify-admin-schema.sql"));
+        PostgresScriptRunner.execute(dataSource, backendRoot().resolve("src/main/resources/db/migration/V8__remove_unused_legacy_schema_objects.sql"));
+        PostgresScriptRunner.execute(dataSource, backendRoot().resolve("src/main/resources/db/migration/V9__restore_backend_entity_tables.sql"));
+        PostgresScriptRunner.execute(dataSource, verifyAdminSchemaScript());
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
         assertThat(jdbc.queryForObject("select to_regclass('rami_art_studio.admin_refresh_tokens') is not null", Boolean.class)).isTrue();
@@ -91,5 +91,20 @@ class AdminSchemaConsolidationMigrationTest {
             if (Files.isDirectory(candidate.resolve("supabase/migrations"))) return candidate;
         }
         throw new IllegalStateException("supabase/migrations directory was not found");
+    }
+
+    private static Path backendRoot() {
+        Path root = projectRoot();
+        Path monorepoBackend = root.resolve("backend");
+        return Files.isDirectory(monorepoBackend.resolve("src/main/resources/db/migration"))
+                ? monorepoBackend
+                : root;
+    }
+
+    private static Path verifyAdminSchemaScript() {
+        Path script = projectRoot().resolve("scripts/verify-admin-schema.sql");
+        return Files.isRegularFile(script)
+                ? script
+                : backendRoot().resolve("src/test/resources/scripts/verify-admin-schema.sql");
     }
 }
